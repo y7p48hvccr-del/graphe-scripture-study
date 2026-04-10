@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Support · Graphē Scripture Study Pro</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root { --sky: #a8c8e0; --gold: #c8a040; --dark: #1a2e1a; --text: #2c2c2c; --muted: #666; --bg: #f8f7f4; }
+    body { font-family: -apple-system, sans-serif; background: var(--bg); color: var(--text); line-height: 1.7; }
+    nav {
+      background: var(--sky); padding: 0 2rem;
+      display: flex; align-items: center; justify-content: space-between;
+      height: 56px; position: sticky; top: 0; z-index: 100;
+    }
+    nav .brand { font-family: Georgia, serif; font-size: 1.25rem; font-style: italic; color: var(--dark); text-decoration: none; }
+    nav .brand span { font-size: 0.7rem; font-style: normal; letter-spacing: 0.15em; display: block; color: #3a5a3a; margin-top: -4px; font-family: -apple-system, sans-serif; }
+    nav ul { list-style: none; display: flex; gap: 2rem; }
+    nav ul a { text-decoration: none; color: var(--dark); font-size: 0.875rem; }
+    nav ul a:hover { color: var(--gold); }
+    .content { max-width: 720px; margin: 4rem auto; padding: 0 2rem 4rem; }
+    h1 { font-family: Georgia, serif; font-size: 2rem; font-style: italic; font-weight: 400; margin-bottom: 0.5rem; color: var(--dark); }
+    .intro { font-size: 0.95rem; color: var(--muted); margin-bottom: 2.5rem; }
+    h2 { font-size: 1.1rem; font-weight: 600; margin: 2.5rem 0 0.75rem; color: var(--dark); }
+    p { margin-bottom: 1rem; font-size: 0.95rem; color: #333; }
+    .faq-item { border-top: 1px solid rgba(200,160,64,0.2); padding-top: 1.25rem; margin-top: 1.25rem; }
+    .faq-item h3 { font-size: 0.95rem; font-weight: 600; margin-bottom: 0.4rem; color: var(--dark); }
+    .faq-item p { margin-bottom: 0; }
+
+    /* Contact form */
+    .contact-form { background: white; border-radius: 12px; padding: 2rem; border: 1px solid rgba(200,160,64,0.2); margin-top: 1.5rem; }
+    .form-group { margin-bottom: 1.25rem; }
+    label { display: block; font-size: 0.85rem; font-weight: 600; margin-bottom: 0.35rem; color: var(--dark); }
+    input, select, textarea {
+      width: 100%; padding: 0.6rem 0.8rem;
+      border: 1px solid #ddd; border-radius: 6px;
+      font-size: 0.9rem; font-family: -apple-system, sans-serif;
+      background: #fafafa; color: var(--text);
+    }
+    input:focus, select:focus, textarea:focus { outline: none; border-color: var(--gold); }
+    textarea { min-height: 130px; resize: vertical; }
+    .submit-btn {
+      background: var(--gold); color: white; border: none;
+      padding: 0.7rem 2rem; border-radius: 8px; font-size: 0.95rem;
+      cursor: pointer; font-family: -apple-system, sans-serif;
+    }
+    .submit-btn:hover { background: #b08830; }
+    footer { background: var(--dark); color: rgba(255,255,255,0.6); text-align: center; padding: 2rem; font-size: 0.8rem; }
+    footer a { color: var(--gold); text-decoration: none; }
+    footer .links { margin-bottom: 0.5rem; display: flex; gap: 1.5rem; justify-content: center; }
+  </style>
+</head>
+<body>
+
+  <nav>
+    <a href="/" class="brand">Graph&#x0113;<span>SCRIPTURE STUDY PRO</span></a>
+    <ul>
+      <li><a href="/#features">Features</a></li>
+      <li><a href="support.html">Support</a></li>
+      <li><a href="privacy.html">Privacy</a></li>
+    </ul>
+  </nav>
+
+  <div class="content">
+    <h1>Support</h1>
+    <p class="intro">Need help with Graph&#x0113;? Browse the frequently asked questions below or send us a message.</p>
+
+    <h2>Frequently asked questions</h2>
+
+    <div class="faq-item">
+      <h3>Where do I get modules?</h3>
+      <p>Graph&#x0113; uses the free MyBible module format. Hundreds of Bible translations, commentaries, dictionaries and lexicons are available at <a href="https://mybible.zone" target="_blank" style="color:var(--gold);">mybible.zone</a>. Download them to a folder on your Mac and point the app to that folder in the Archives tab.</p>
+    </div>
+
+    <div class="faq-item">
+      <h3>How do I add my modules to the app?</h3>
+      <p>Go to the Archives tab, tap Choose Modules Folder, and select the folder containing your .sqlite3 files. The app will scan and load them automatically.</p>
+    </div>
+
+    <div class="faq-item">
+      <h3>How do I add books?</h3>
+      <p>Go to the Books tab, tap Choose Folder, and select a folder containing your EPUB or PDF files. You can also use the Discover tab to browse and download free books directly from sources like Monergism and CCEL.</p>
+    </div>
+
+    <div class="faq-item">
+      <h3>Does the app work offline?</h3>
+      <p>Yes — all Bible reading, notes, modules and downloaded books work fully offline. An internet connection is only needed for the Discover browser, AI features using the cloud option, and iCloud sync.</p>
+    </div>
+
+    <div class="faq-item">
+      <h3>How does iCloud sync work?</h3>
+      <p>When enabled, your notes, bookmarks and settings sync automatically across your Mac and iPhone via your personal iCloud account. Your module files and books are not synced — these remain in the folders you chose on each device.</p>
+    </div>
+
+    <div class="faq-item">
+      <h3>What is the AI study assistant?</h3>
+      <p>The Chat tab lets you ask theological questions and get Scripture-grounded responses. You can use it with Ollama running locally on your Mac (free, private, no account needed) or with the Anthropic Claude API (requires an API key).</p>
+    </div>
+
+    <div class="faq-item">
+      <h3>What does Graph&#x0113; mean?</h3>
+      <p>Graph&#x0113; (&#x03B3;&#x03C1;&#x03B1;&#x03C6;&#x03AE;) is the Greek word for Scripture, used in 2 Timothy 3:16 — &#x201C;All Scripture is God-breathed.&#x201D;</p>
+    </div>
+
+    <h2>Send a message</h2>
+    <div class="contact-form">
+      <form action="https://formspree.io/f/placeholder" method="POST">
+        <div class="form-group">
+          <label for="name">Your name</label>
+          <input type="text" id="name" name="name" placeholder="Your name" required>
+        </div>
+        <div class="form-group">
+          <label for="topic">Topic</label>
+          <select id="topic" name="topic">
+            <option value="bug">Bug report</option>
+            <option value="feature">Feature request</option>
+            <option value="modules">Modules &amp; content</option>
+            <option value="other">General question</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="message">Message</label>
+          <textarea id="message" name="message" placeholder="Describe your question or issue…" required></textarea>
+        </div>
+        <button type="submit" class="submit-btn">Send message</button>
+      </form>
+    </div>
+  </div>
+
+  <footer>
+    <div class="links">
+      <a href="support.html">Support</a>
+      <a href="privacy.html">Privacy Policy</a>
+    </div>
+    <p>&copy; 2026 Graph&#x0113; &middot; graphe.one</p>
+  </footer>
+
+</body>
+</html>
