@@ -1,0 +1,71 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
+<meta name="AppleTitle" content="Installing Modules">
+<title>Installing Modules — ScriptureStudy Help</title>
+<link rel="stylesheet" href="style.css"></head><body><nav>
+    <div class="logo">📖 ScriptureStudy</div>
+    <h2>Getting Started</h2>
+    <a href="index.html">Welcome</a>
+    <a href="quickstart.html">Quick Start</a>
+    <a href="modules.html">Installing Modules</a>
+    <h2>The Bible Panel</h2>
+    <a href="bible-panel.html">Navigation</a>
+    <a href="strongs.html">Strong's Numbers</a>
+    <a href="bookmarks.html">Bookmarks</a>
+    <h2>Companion Panel</h2>
+    <a href="comparison.html">Comparison</a>
+    <a href="commentary.html">Commentary</a>
+    <a href="dictionaries.html">Dictionaries</a>
+    <a href="notes-companion.html">Notes Tab</a>
+    <a href="web.html">Web Tab</a>
+    <h2>Organizer</h2>
+    <a href="notes.html">Writing Notes</a>
+    <a href="organizer-bookmarks.html">Bookmarks</a>
+    <h2>Tools</h2>
+    <a href="search.html">Search</a>
+    <a href="library.html">Module Library</a>
+    <a href="ai.html">AI Summaries</a>
+    <h2>Customisation</h2>
+    <a href="themes.html">Themes &amp; Fonts</a>
+    <a href="settings.html">Settings</a>
+    <h2>Reference</h2>
+    <a href="shortcuts.html">Keyboard Shortcuts</a>
+    <a href="formats.html">Module Formats</a>
+    <a href="troubleshooting.html">Troubleshooting</a>
+</nav><article>
+<h1>Installing Modules</h1>
+<p class="subtitle">ScriptureStudy uses the open MyBible module format — a SQLite3 database with a standardised schema.</p>
+
+<h2>Module types</h2>
+<table>
+<tr><th>Type</th><th>File indicator</th><th>Description</th></tr>
+<tr><td>Bible</td><td>Contains a <code>verses</code> table</td><td>A complete Bible translation</td></tr>
+<tr><td>Commentary</td><td>Contains a <code>commentaries</code> table</td><td>Verse-by-verse commentary</td></tr>
+<tr><td>Strong's lexicon</td><td><code>is_strong = true</code> in info table</td><td>Hebrew or Greek lexicon keyed to Strong's numbers</td></tr>
+<tr><td>Dictionary</td><td>Contains a <code>dictionary</code> table, <code>is_strong = false</code></td><td>General dictionary (e.g. Webster's)</td></tr>
+<tr><td>Other</td><td>Anything else</td><td>Devotionals, topic lists, etc.</td></tr>
+</table>
+
+<h2>Adding modules</h2>
+<ol>
+    <li>Download a <code>.SQLite3</code> module file from the MyBible community or any compatible source.</li>
+    <li>Place it in your chosen modules folder.</li>
+    <li>In the <strong>Library</strong> tab, click the <strong>Refresh</strong> button (↺) in the toolbar.</li>
+    <li>The module appears in the appropriate section automatically.</li>
+</ol>
+
+<h2>Importing e-Sword and MySword modules</h2>
+<p>ScriptureStudy can convert modules from e-Sword and MySword formats. Click the <strong>Import e-Sword</strong> button in the Library toolbar and select a file with one of these extensions:</p>
+<ul>
+    <li><code>.bblx</code> — e-Sword Bible</li>
+    <li><code>.cmtx</code> — e-Sword Commentary</li>
+    <li><code>.dctx</code> / <code>.lexdbtx</code> — e-Sword Dictionary or Lexicon</li>
+    <li><code>.mybible</code> — MySword Bible</li>
+</ul>
+<p>The converted module is saved into your modules folder automatically.</p>
+<div class="warn"><strong>Note:</strong> Encrypted <code>.bblx</code> files (commercial modules) cannot be converted and will show an error.</div>
+
+<h2>Hiding modules</h2>
+<p>If you have many modules installed, you can hide individual ones from the picker dropdowns without deleting them. In the Library, click the <strong>eye icon</strong> next to any module to toggle its visibility. Hidden modules remain on disk but do not appear in navigation menus.</p>
+
+<h2>Renaming modules</h2>
+<p>The display name of any module is read from the <code>description</code> field in its <code>info</code> table. You can rename a module by editing this field in any SQLite editor (such as DB Browser for SQLite) — changes take effect the next time ScriptureStudy scans the folder.</p></article></body></html>

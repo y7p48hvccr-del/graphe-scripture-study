@@ -1,0 +1,73 @@
+import SwiftUI
+
+// Custom Bible picker with guaranteed fixed width
+// Uses a popover list instead of Menu — Menu cannot be width-constrained on macOS
+struct BiblePickerButton: View {
+    let modules:    [MyBibleModule]
+    @Binding var selected: MyBibleModule?
+    let accent:     Color
+    let textColor:  Color
+
+    @State private var showPopover = false
+
+    var body: some View {
+        Button { showPopover.toggle() } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "book.fill")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(accent)
+                Text(selected?.name ?? "Select Bible")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(textColor)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: 8, weight: .semibold))
+                    .foregroundStyle(accent)
+            }
+            .padding(.horizontal, 8).padding(.vertical, 4)
+            .background(textColor.opacity(0.06))
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+            .frame(width: 160)
+        }
+        .buttonStyle(.plain)
+        .popover(isPresented: $showPopover, arrowEdge: .bottom) {
+            VStack(alignment: .leading, spacing: 0) {
+                Button {
+                    selected = nil
+                    showPopover = false
+                } label: {
+                    Text("None")
+                        .font(.system(size: 13))
+                        .foregroundStyle(.primary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 14).padding(.vertical, 7)
+                        .background(selected == nil ? accent.opacity(0.1) : Color.clear)
+                }
+                .buttonStyle(.plain)
+                Divider()
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(modules) { m in
+                            Button {
+                                selected = m
+                                showPopover = false
+                            } label: {
+                                Text(m.name)
+                                    .font(.system(size: 13))
+                                    .foregroundStyle(.primary)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(.horizontal, 14).padding(.vertical, 7)
+                                    .background(selected?.filePath == m.filePath ? accent.opacity(0.1) : Color.clear)
+                            }
+                            .buttonStyle(.plain)
+                            .help(m.name)
+                        }
+                    }
+                }
+                .frame(maxHeight: 300)
+            }
+            .frame(width: 280)
+        }
+    }
+}

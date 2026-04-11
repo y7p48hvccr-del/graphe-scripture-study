@@ -1,0 +1,79 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
+<meta name="AppleTitle" content="Troubleshooting">
+<title>Troubleshooting — ScriptureStudy Help</title>
+<link rel="stylesheet" href="style.css"></head><body><nav>
+    <div class="logo">📖 ScriptureStudy</div>
+    <h2>Getting Started</h2>
+    <a href="index.html">Welcome</a>
+    <a href="quickstart.html">Quick Start</a>
+    <a href="modules.html">Installing Modules</a>
+    <h2>The Bible Panel</h2>
+    <a href="bible-panel.html">Navigation</a>
+    <a href="strongs.html">Strong's Numbers</a>
+    <a href="bookmarks.html">Bookmarks</a>
+    <h2>Companion Panel</h2>
+    <a href="comparison.html">Comparison</a>
+    <a href="commentary.html">Commentary</a>
+    <a href="dictionaries.html">Dictionaries</a>
+    <a href="notes-companion.html">Notes Tab</a>
+    <a href="web.html">Web Tab</a>
+    <h2>Organizer</h2>
+    <a href="notes.html">Writing Notes</a>
+    <a href="organizer-bookmarks.html">Bookmarks</a>
+    <h2>Tools</h2>
+    <a href="search.html">Search</a>
+    <a href="library.html">Module Library</a>
+    <a href="ai.html">AI Summaries</a>
+    <h2>Customisation</h2>
+    <a href="themes.html">Themes &amp; Fonts</a>
+    <a href="settings.html">Settings</a>
+    <h2>Reference</h2>
+    <a href="shortcuts.html">Keyboard Shortcuts</a>
+    <a href="formats.html">Module Formats</a>
+    <a href="troubleshooting.html">Troubleshooting</a>
+</nav><article>
+<h1>Troubleshooting</h1>
+<p class="subtitle">Solutions to common issues.</p>
+
+<h2>No modules appear in the Library</h2>
+<ul>
+    <li>Check that you have selected a modules folder — open the Library tab and look for the folder path at the bottom.</li>
+    <li>Confirm your <code>.SQLite3</code> files are directly inside the selected folder (not in a subfolder).</li>
+    <li>Click the Refresh button (↺) in the Library toolbar to re-scan.</li>
+</ul>
+
+<h2>Strong's words are not highlighted</h2>
+<ul>
+    <li>Confirm your Bible module includes Strong's tagging — not all translations do.</li>
+    <li>Confirm you have a Strong's lexicon installed and selected in the Companion panel Dictionaries tab.</li>
+    <li>Some modules use non-standard Strong's markup that may not be fully supported.</li>
+</ul>
+
+<h2>The dictionary lookup is not working</h2>
+<ul>
+    <li>Confirm a dictionary module is installed and selected in the Companion panel Dictionaries tab.</li>
+    <li>The clipboard monitor checks every 0.5 seconds — copy the word again and wait a moment.</li>
+    <li>Some dictionary modules use topic keys that differ from standard English spelling — try a different dictionary.</li>
+</ul>
+
+<h2>e-Sword import fails</h2>
+<ul>
+    <li>Encrypted commercial modules cannot be converted — you will see a clear error message.</li>
+    <li>Ensure Python 3 is installed on your Mac (it is included by default on macOS).</li>
+    <li>Check that your modules folder is writable.</li>
+</ul>
+
+<h2>Notes are not saving</h2>
+<ul>
+    <li>Check that <code>~/Documents/ScriptureStudy Notes/</code> exists and is writable.</li>
+    <li>Notes save automatically within one second of you stopping typing — you do not need to do anything.</li>
+</ul>
+
+<h2>AI summaries are not appearing</h2>
+<ul>
+    <li>For Claude: check your API key in Settings and ensure you have available API credits.</li>
+    <li>For Ollama: confirm Ollama is running (<code>ollama serve</code> in Terminal) and the model name matches exactly.</li>
+</ul>
+
+<h2>The app is showing the wrong colour scheme</h2>
+<p>ScriptureStudy respects both its own theme setting and macOS's light/dark mode. If colours look unexpected, check <strong>Settings → Appearance</strong> and ensure your chosen theme matches your macOS appearance preference.</p></article></body></html>

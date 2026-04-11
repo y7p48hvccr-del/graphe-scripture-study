@@ -1,0 +1,53 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
+<meta name="AppleTitle" content="Module Formats">
+<title>Module Formats — ScriptureStudy Help</title>
+<link rel="stylesheet" href="style.css"></head><body><nav>
+    <div class="logo">📖 ScriptureStudy</div>
+    <h2>Getting Started</h2>
+    <a href="index.html">Welcome</a>
+    <a href="quickstart.html">Quick Start</a>
+    <a href="modules.html">Installing Modules</a>
+    <h2>The Bible Panel</h2>
+    <a href="bible-panel.html">Navigation</a>
+    <a href="strongs.html">Strong's Numbers</a>
+    <a href="bookmarks.html">Bookmarks</a>
+    <h2>Companion Panel</h2>
+    <a href="comparison.html">Comparison</a>
+    <a href="commentary.html">Commentary</a>
+    <a href="dictionaries.html">Dictionaries</a>
+    <a href="notes-companion.html">Notes Tab</a>
+    <a href="web.html">Web Tab</a>
+    <h2>Organizer</h2>
+    <a href="notes.html">Writing Notes</a>
+    <a href="organizer-bookmarks.html">Bookmarks</a>
+    <h2>Tools</h2>
+    <a href="search.html">Search</a>
+    <a href="library.html">Module Library</a>
+    <a href="ai.html">AI Summaries</a>
+    <h2>Customisation</h2>
+    <a href="themes.html">Themes &amp; Fonts</a>
+    <a href="settings.html">Settings</a>
+    <h2>Reference</h2>
+    <a href="shortcuts.html">Keyboard Shortcuts</a>
+    <a href="formats.html">Module Formats</a>
+    <a href="troubleshooting.html">Troubleshooting</a>
+</nav><article>
+<h1>Module Formats</h1>
+<p class="subtitle">Technical details about the file formats ScriptureStudy understands.</p>
+<h2>MyBible SQLite3</h2>
+<p>The primary format. Each module is a single <code>.SQLite3</code> file containing an <code>info</code> table with metadata and one or more content tables depending on the module type. ScriptureStudy detects the module type from the tables present and the <code>is_strong</code> field in the info table.</p>
+<h2>e-Sword / MySword</h2>
+<p>ScriptureStudy can import these formats and convert them to MyBible SQLite3. The converter handles Strong's markup (<code>&lt;WG&gt;</code> and <code>&lt;WH&gt;</code> tags) translating them to the MyBible <code>&lt;S&gt;</code> format. Encrypted commercial e-Sword modules cannot be converted.</p>
+<h2>Note files</h2>
+<p>Notes are stored as plain UTF-8 text files in <code>~/Documents/ScriptureStudy Notes/</code>. The format is:</p>
+<pre style="background:var(--code-bg);padding:12px;border-radius:6px;font-size:12px;margin:12px 0">
+Title
+BookNumber
+ChapterNumber
+VerseNumbers (comma-separated)
+ISO 8601 date
+UUID
+locked/unlocked
+---
+Note content begins here...</pre>
+<p>These files can be opened, edited and backed up with any text editor or file manager.</p></article></body></html>

@@ -1,0 +1,20 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title>Supported Formats</title>
+<link rel="stylesheet" href="style.css"></head><body><article>
+<h1>Supported File Formats</h1>
+<p class="subtitle">What module files ScriptureStudy can read</p>
+<h2>Native format — MyBible SQLite</h2>
+<p>ScriptureStudy reads MyBible-format SQLite files directly. These are standard SQLite3 databases with a <code>.SQLite3</code> extension. The module type is detected automatically from the tables present:</p>
+<table>
+<tr><th>Table</th><th>Module type</th></tr>
+<tr><td><code>verses</code></td><td>Bible</td></tr>
+<tr><td><code>devotions</code></td><td>Devotional</td></tr>
+<tr><td><code>reading_plan</code></td><td>Reading Plan</td></tr>
+<tr><td><code>cross_references</code></td><td>Cross-Reference (OBX)</td></tr>
+<tr><td><code>commentaries</code> + TSK/footnote flag</td><td>Cross-Reference (TSK)</td></tr>
+<tr><td><code>commentaries</code></td><td>Commentary</td></tr>
+<tr><td><code>dictionary</code> + <code>is_strong=true</code></td><td>Lexicon</td></tr>
+<tr><td><code>dictionary</code> + <code>is_strong=false</code></td><td>Dictionary</td></tr>
+</table>
+<h2>Imported formats — e-Sword / MySword</h2>
+<p>Use the <strong>Import e-Sword</strong> button in the Library toolbar to convert e-Sword (<code>.bblx</code>, <code>.cmtx</code>, <code>.dctx</code>) and MySword (<code>.mybible</code>) files into MyBible format. The converted file is saved to your modules folder automatically.</p>
+</article></body></html>

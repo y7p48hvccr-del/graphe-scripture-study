@@ -1,0 +1,27 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title>Cross-References</title>
+<link rel="stylesheet" href="style.css"></head><body><article>
+<h1>Cross-References</h1>
+<p class="subtitle">Scripture linking scripture</p>
+
+<h2 id="how-it-works">How it works</h2>
+<p>Tap any verse number in the Bible panel to load cross-references for that verse in the companion panel. The companion panel switches automatically to the Cross-References tab.</p>
+
+<h2 id="module-types">Module types</h2>
+<p>ScriptureStudy supports two cross-reference formats:</p>
+<table>
+<tr><th>Format</th><th>Description</th></tr>
+<tr><td>OBX (Native)</td><td>MyBible native format with a <code>cross_references</code> table. References are grouped into Primary, Secondary and Related categories based on relevance votes.</td></tr>
+<tr><td>TSK</td><td>Treasury of Scripture Knowledge format stored in a <code>commentaries</code> table. Includes the classic TSK and enhanced editions.</td></tr>
+<tr><td>NKJV Footnotes</td><td>The NKJV footnote apparatus linking footnote markers to supporting scriptures.</td></tr>
+</table>
+
+<h2 id="switching-modules">Switching modules</h2>
+<p>A picker in the Cross-References tab header lets you switch between all installed cross-reference modules. Selecting a new module reloads the references for the current verse immediately.</p>
+
+<h2 id="navigating">Navigating to a reference</h2>
+<p>Tap any cross-reference entry to load that passage in the <strong>Comparison panel</strong>. The main Bible panel stays on your current passage. A <strong>Back</strong> button appears at the top of the comparison panel to return to the current chapter.</p>
+<div class="tip">Cross-reference navigation always goes to the Comparison panel — your main Bible reading position is never disturbed.</div>
+
+<h2 id="installing">Installing cross-reference modules</h2>
+<p>Copy your cross-reference SQLite files into your modules folder and refresh the Library. Files with <code>is_footnotes=true</code> in their info table, or whose description contains "treasury", "TSK", "cross-reference" or "footnote", are automatically detected as cross-reference modules.</p>
+</article></body></html>

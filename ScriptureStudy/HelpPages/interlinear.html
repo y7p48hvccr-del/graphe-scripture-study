@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><title>Interlinear</title>
+<link rel="stylesheet" href="style.css"></head><body><article>
+<h1>Interlinear</h1>
+<p class="subtitle">Word-by-word Hebrew and Greek alongside English</p>
+
+<h2>Overview</h2>
+<p>The Interlinear tab shows the full current chapter with each English word paired with its original Hebrew (Old Testament) or Greek (New Testament) equivalent, transliteration, morphology code (NT only), and Strong's number.</p>
+
+<h2>Installing interlinear modules</h2>
+<p>The Interlinear tab requires dedicated interlinear modules in your modules folder:</p>
+<ul>
+<li><strong>iESVTH_.SQLite3</strong> — English-Greek New Testament interlinear (ESV + Tyndale House GNT)</li>
+<li><strong>IHOT_.SQLite3</strong> — Hebrew Old Testament interlinear with Strong's numbers</li>
+</ul>
+<p>Place these in your modules folder alongside your other modules. ScriptureStudy detects them automatically.</p>
+
+<h2>Reading the word cells</h2>
+<p>Each word in the chapter appears as a small cell. For the New Testament the layout is:</p>
+<table>
+<tr><th>Row</th><th>Content</th></tr>
+<tr><td>Top</td><td>English word</td></tr>
+<tr><td>Middle</td><td>Greek word (original script)</td></tr>
+<tr><td>Italic</td><td>Morphology code (e.g. V-AAI-3S, CONJ)</td></tr>
+<tr><td>Bottom</td><td>Strong's number (e.g. G25)</td></tr>
+</table>
+<p>For the Old Testament, the Hebrew word appears on top (right-to-left), with the English translation below and the Strong's number at the bottom.</p>
+
+<h2>Looking up a word</h2>
+<p>Tap any word cell to select it. A card slides up from the bottom of the tab showing the Strong's entry — the original word, transliteration, pronunciation, short definition, and KJV usage. The card is scrollable for longer entries.</p>
+<p>Tap <strong>Full entry in Dictionaries →</strong> inside the card to switch to the Dictionaries tab and see the complete lexicon entry. Tap the word cell again or press ✕ to dismiss the card.</p>
+
+<h2>Scroll sync</h2>
+<p>The Interlinear tab stays in sync with the verse you have selected in the main Bible panel, scrolling automatically to keep the relevant verse in view.</p>
+
+<h2>Morphology codes (NT)</h2>
+<p>Each Greek word displays a morphology tag. Some common codes:</p>
+<table>
+<tr><th>Code</th><th>Meaning</th></tr>
+<tr><td>V-AAI-3S</td><td>Verb, Aorist, Active, Indicative, 3rd person Singular</td></tr>
+<tr><td>N-NSM</td><td>Noun, Nominative, Singular, Masculine</td></tr>
+<tr><td>T-ASM</td><td>Article, Accusative, Singular, Masculine</td></tr>
+<tr><td>CONJ</td><td>Conjunction</td></tr>
+<tr><td>ADV</td><td>Adverb</td></tr>
+</table>
+
+<div class="tip">If no Strong's lexicon is selected in the Dictionaries tab, the inline card will prompt you to select one. You do not need a lexicon for the word cells themselves to display.</div>
+</article></body></html>

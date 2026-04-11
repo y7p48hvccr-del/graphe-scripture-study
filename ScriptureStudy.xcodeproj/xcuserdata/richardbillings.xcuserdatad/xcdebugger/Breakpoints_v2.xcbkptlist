@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Bucket
+   uuid = "F7D42BC2-C9E5-4EB3-9E54-8F2CEB738471"
+   type = "1"
+   version = "2.0">
+   <Breakpoints>
+      <BreakpointProxy
+         BreakpointExtensionID = "Xcode.Breakpoint.FileBreakpoint">
+         <BreakpointContent
+            uuid = "4FC679B3-252D-4D4E-AAD6-9427B2E7ECFC"
+            shouldBeEnabled = "Yes"
+            ignoreCount = "0"
+            continueAfterRunningActions = "No"
+            filePath = "ScriptureStudy/EPUBParser.swift"
+            startingColumnNumber = "9223372036854775807"
+            endingColumnNumber = "9223372036854775807"
+            startingLineNumber = "649"
+            endingLineNumber = "649"
+            landmarkName = "findCover(opfStr:manifest:archive:)"
+            landmarkType = "7">
+         </BreakpointContent>
+      </BreakpointProxy>
+      <BreakpointProxy
+         BreakpointExtensionID = "Xcode.Breakpoint.FileBreakpoint">
+         <BreakpointContent
+            uuid = "46DA3F48-81AA-461A-A8CD-102F869C4471"
+            shouldBeEnabled = "Yes"
+            ignoreCount = "0"
+            continueAfterRunningActions = "No"
+            filePath = "ScriptureStudy/EPUBParser.swift"
+            startingColumnNumber = "9223372036854775807"
+            endingColumnNumber = "9223372036854775807"
+            startingLineNumber = "648"
+            endingLineNumber = "648"
+            landmarkName = "findCover(opfStr:manifest:archive:)"
+            landmarkType = "7">
+            <Locations>
+               <Location
+                  uuid = "46DA3F48-81AA-461A-A8CD-102F869C4471 - 8549649b501ea251"
+                  shouldBeEnabled = "Yes"
+                  ignoreCount = "0"
+                  continueAfterRunningActions = "No"
+                  symbolName = "static ScriptureStudy.EPUBParser.findCover(opfStr: Swift.String, manifest: Swift.Dictionary&lt;Swift.String, Swift.String&gt;, archive: ZIPFoundation.Archive) -&gt; Swift.Optional&lt;__C.NSImage&gt;"
+                  moduleName = "ScriptureStudy.debug.dylib"
+                  usesParentBreakpointCondition = "Yes"
+                  urlString = "file:///Users/richardbillings/Library/Mobile%20Documents/com~apple~CloudDocs/Xcode%20Projects/ScriptureStudy2/ScriptureStudy/EPUBParser.swift"
+                  startingColumnNumber = "9223372036854775807"
+                  endingColumnNumber = "9223372036854775807"
+                  startingLineNumber = "648"
+                  endingLineNumber = "648">
+               </Location>
+               <Location
+                  uuid = "46DA3F48-81AA-461A-A8CD-102F869C4471 - 1bb127959cfe0077"
+                  shouldBeEnabled = "Yes"
+                  ignoreCount = "0"
+                  continueAfterRunningActions = "No"
+                  symbolName = "closure #2 (Swift.String) -&gt; Swift.Bool in static ScriptureStudy.EPUBParser.findCover(opfStr: Swift.String, manifest: Swift.Dictionary&lt;Swift.String, Swift.String&gt;, archive: ZIPFoundation.Archive) -&gt; Swift.Optional&lt;__C.NSImage&gt;"
+                  moduleName = "ScriptureStudy.debug.dylib"
+                  usesParentBreakpointCondition = "Yes"
+                  urlString = "file:///Users/richardbillings/Library/Mobile%20Documents/com~apple~CloudDocs/Xcode%20Projects/ScriptureStudy2/ScriptureStudy/EPUBParser.swift"
+                  startingColumnNumber = "9223372036854775807"
+                  endingColumnNumber = "9223372036854775807"
+                  startingLineNumber = "649"
+                  endingLineNumber = "649">
+               </Location>
+            </Locations>
+         </BreakpointContent>
+      </BreakpointProxy>
+      <BreakpointProxy
+         BreakpointExtensionID = "Xcode.Breakpoint.FileBreakpoint">
+         <BreakpointContent
+            uuid = "85DD0CF5-60D7-43ED-877A-142452A81D9D"
+            shouldBeEnabled = "Yes"
+            ignoreCount = "0"
+            continueAfterRunningActions = "No"
+            filePath = "ScriptureStudy/EPUBParser.swift"
+            startingColumnNumber = "9223372036854775807"
+            endingColumnNumber = "9223372036854775807"
+            startingLineNumber = "590"
+            endingLineNumber = "590"
+            landmarkName = "read(_:from:)"
+            landmarkType = "7">
+         </BreakpointContent>
+      </BreakpointProxy>
+      <BreakpointProxy
+         BreakpointExtensionID = "Xcode.Breakpoint.FileBreakpoint">
+         <BreakpointContent
+            uuid = "222484BC-FC6E-46AF-BA1E-4DFC092EA919"
+            shouldBeEnabled = "Yes"
+            ignoreCount = "0"
+            continueAfterRunningActions = "No"
+            filePath = "ScriptureStudy/EPUBParser.swift"
+            startingColumnNumber = "9223372036854775807"
+            endingColumnNumber = "9223372036854775807"
+            startingLineNumber = "262"
+            endingLineNumber = "262"
+            landmarkName = "injectLinksSimple(into:accentHex:linkCSS:)"
+            landmarkType = "7">
+         </BreakpointContent>
+      </BreakpointProxy>
+   </Breakpoints>
+</Bucket>

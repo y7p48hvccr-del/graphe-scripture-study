@@ -1,0 +1,26 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title>Troubleshooting</title>
+<link rel="stylesheet" href="style.css"></head><body><article>
+<h1>Troubleshooting</h1>
+<p class="subtitle">Common issues and solutions</p>
+
+<h2 id="no-modules">No modules appear in the Library</h2>
+<p>Make sure you've selected your modules folder using <strong>Choose Modules Folder</strong> in the Library toolbar. Then click <strong>↺ Refresh</strong>. The folder must contain <code>.SQLite3</code> files with valid MyBible table structures.</p>
+
+<h2 id="wrong-category">A module appears in the wrong category</h2>
+<p>Module type is detected from the database structure. If a module is miscategorised, its <code>info</code> table description may be misleading the detector. You can rename the description field using a SQLite editor such as DB Browser for SQLite. Alternatively, contact the module author for a corrected version.</p>
+
+<h2 id="no-crossrefs">Cross-references show nothing</h2>
+<p>Make sure you have a cross-reference module installed and visible in the Library. Select it using the picker in the Cross-References tab of the companion panel. Some modules only cover parts of the Bible.</p>
+
+<h2>Bible text looks garbled</h2>
+<p>Some older modules use encoding that differs from UTF-8. This is a known limitation of certain third-party modules and cannot be corrected within the app.</p>
+
+<h2 id="notes-sync">Notes aren't syncing</h2>
+<p>Notes sync via iCloud. Check that iCloud Drive is enabled in System Settings → Apple ID → iCloud. Make sure ScriptureStudy has iCloud access. Notes sync may take a few minutes after changes.</p>
+
+<h2>The app icon isn't showing in the Dock</h2>
+<p>If running a development build from Xcode, the Dock icon may show as the default Xcode icon. Build a Release version and copy the <code>.app</code> to your Applications folder. If the icon still doesn't update, run <code>killall Dock</code> in Terminal.</p>
+
+<h2>Help files not found</h2>
+<p>This indicates the HelpPages folder wasn't included in the app bundle. In Xcode, check that HelpPages appears in <strong>Build Phases → Copy Bundle Resources</strong> as a blue folder reference, and rebuild.</p>
+</article></body></html>

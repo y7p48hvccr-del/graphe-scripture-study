@@ -1,0 +1,534 @@
+{
+  "note": "Dates are approximate. Biblical chronology is debated among scholars. This timeline follows a broadly evangelical framework as a baseline.",
+  "events": [
+    {
+      "year": -4000,
+      "title": "Creation",
+      "books": [
+        "GEN"
+      ],
+      "category": "creation",
+      "description": "The creation of the heavens and earth as described in Genesis 1\u20132.",
+      "dateRationale": "Traditional chronology based on the Masoretic Text genealogies places creation around 4004 BC (Ussher) or 4000 BC (various). Modern evangelical scholars generally treat the Genesis days as periods rather than literal 24-hour days, making precise dating impossible.",
+      "debate": "Young-earth creationists follow Ussher's 4004 BC. Old-earth creationists and most mainstream scholars regard the Genesis creation account as theological rather than chronological, making any specific date a theological rather than historical calculation.",
+      "sources": [
+        {
+          "label": "Ussher's Annals of the World (1658)",
+          "url": "https://www.gutenberg.org/ebooks/17660"
+        },
+        {
+          "label": "John Walton \u2014 The Lost World of Genesis One",
+          "url": "https://www.ivpress.com/the-lost-world-of-genesis-one"
+        }
+      ],
+      "perspectives": [
+        {
+          "label": "Young Earth Creationism",
+          "summary": "The universe and life were created in six literal 24-hour days, approximately 6,000\u201310,000 years ago. All apparent evidence for an old earth is attributed to the global Flood or flawed dating methods.",
+          "thinkers": [
+            "Ken Ham (Answers in Genesis)",
+            "Henry Morris (Institute for Creation Research)",
+            "Andrew Snelling"
+          ],
+          "sources": [
+            {
+              "label": "Answers in Genesis",
+              "url": "https://answersingenesis.org"
+            },
+            {
+              "label": "Institute for Creation Research",
+              "url": "https://www.icr.org"
+            },
+            {
+              "label": "Morris \u2014 The Genesis Record",
+              "url": "https://www.icr.org/product/genesis-record/"
+            }
+          ]
+        },
+        {
+          "label": "Old Earth / Progressive Creationism",
+          "summary": "The universe is billions of years old as science indicates, but God directly created distinct life forms at various points in history. The Genesis 'days' are long ages. Hugh Ross argues the Big Bang itself is evidence for a Creator.",
+          "thinkers": [
+            "Hugh Ross (Reasons to Believe)",
+            "Gleason Archer",
+            "Walter Bradley"
+          ],
+          "sources": [
+            {
+              "label": "Reasons to Believe \u2014 Hugh Ross",
+              "url": "https://reasons.org"
+            },
+            {
+              "label": "Ross \u2014 The Creator and the Cosmos",
+              "url": "https://reasons.org/explore/publications/books/the-creator-and-the-cosmos"
+            },
+            {
+              "label": "Ross \u2014 A Matter of Days",
+              "url": "https://reasons.org/explore/publications/books/a-matter-of-days"
+            }
+          ]
+        },
+        {
+          "label": "Intelligent Design",
+          "summary": "Certain features of living organisms \u2014 particularly the information content of DNA, and 'irreducibly complex' molecular machines \u2014 are best explained by an intelligent cause rather than undirected natural processes. ID proponents argue this is a scientific rather than religious claim.",
+          "thinkers": [
+            "Stephen Meyer (Discovery Institute) \u2014 Signature in the Cell",
+            "Michael Behe \u2014 Darwin's Black Box",
+            "William Dembski \u2014 specified complexity"
+          ],
+          "sources": [
+            {
+              "label": "Meyer \u2014 Signature in the Cell",
+              "url": "https://www.signatureinthecell.com"
+            },
+            {
+              "label": "Behe \u2014 Darwin's Black Box",
+              "url": "https://www.discovery.org/b/darwins-black-box/"
+            },
+            {
+              "label": "Discovery Institute \u2014 Center for Science and Culture",
+              "url": "https://www.discovery.org/id/"
+            },
+            {
+              "label": "Behe \u2014 Irreducible Complexity (peer-reviewed response)",
+              "url": "https://www.lehigh.edu/~inbios/faculty/behe.html"
+            }
+          ]
+        },
+        {
+          "label": "Theistic Evolution",
+          "summary": "Evolution is the mechanism God used to create life. There is no conflict between evolutionary science and Christian faith \u2014 God works through natural processes. The Genesis creation accounts are theological rather than scientific texts.",
+          "thinkers": [
+            "Francis Collins \u2014 led the Human Genome Project, founder of BioLogos",
+            "John Polkinghorne (physicist, priest)",
+            "Alister McGrath (Oxford)"
+          ],
+          "sources": [
+            {
+              "label": "BioLogos \u2014 Francis Collins",
+              "url": "https://biologos.org"
+            },
+            {
+              "label": "Collins \u2014 The Language of God",
+              "url": "https://biologos.org/the-language-of-god/"
+            },
+            {
+              "label": "Polkinghorne \u2014 Belief in God in an Age of Science",
+              "url": "https://yalebooks.yale.edu/book/9780300096316/belief-god-age-science"
+            }
+          ]
+        },
+        {
+          "label": "Fine-Tuning and Cosmic Design",
+          "summary": "The fundamental constants of physics appear exquisitely calibrated to permit complex life \u2014 a phenomenon known as the 'fine-tuned universe'. Some physicists see this as pointing toward purpose or intelligence; others invoke the multiverse as an explanation.",
+          "thinkers": [
+            "Paul Davies \u2014 The Goldilocks Enigma",
+            "Roger Penrose (Nobel Prize) \u2014 extraordinary low entropy of the Big Bang",
+            "George Ellis \u2014 philosophical implications of cosmology",
+            "John Lennox (Oxford) \u2014 God's Undertaker"
+          ],
+          "sources": [
+            {
+              "label": "Davies \u2014 The Goldilocks Enigma",
+              "url": "https://www.penguinrandomhouse.com/books/291070/the-goldilocks-enigma-by-paul-davies/"
+            },
+            {
+              "label": "Penrose \u2014 The Road to Reality",
+              "url": "https://www.penguinrandomhouse.com/books/286100/the-road-to-reality-by-roger-penrose/"
+            },
+            {
+              "label": "Lennox \u2014 God's Undertaker: Has Science Buried God?",
+              "url": "https://www.johnlennox.org/books/gods-undertaker"
+            },
+            {
+              "label": "Ellis \u2014 On the Moral Nature of the Universe",
+              "url": "https://www.fortresspress.com/store/product/9780800629069/On-the-Moral-Nature-of-the-Universe"
+            }
+          ]
+        },
+        {
+          "label": "Science and Faith \u2014 Compatibility",
+          "summary": "A broader perspective: many leading scientists across history and today hold religious belief alongside rigorous scientific practice. The perceived conflict between science and faith is argued by historians to be a 19th century invention rather than an inherent tension.",
+          "thinkers": [
+            "John Lennox (Oxford mathematician and Christian apologist)",
+            "Alvin Plantinga (philosopher of science)",
+            "Denis Alexander (Faraday Institute, Cambridge)"
+          ],
+          "sources": [
+            {
+              "label": "Lennox \u2014 Can Science Explain Everything?",
+              "url": "https://www.johnlennox.org/books/can-science-explain-everything"
+            },
+            {
+              "label": "Numbers \u2014 Galileo Goes to Jail (myth vs reality of science/faith conflict)",
+              "url": "https://www.hup.harvard.edu/catalog.php?isbn=9780674057418"
+            },
+            {
+              "label": "Faraday Institute for Science and Religion \u2014 Cambridge",
+              "url": "https://www.faraday.cam.ac.uk"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "year": -3000,
+      "title": "Noah and the Flood",
+      "books": [
+        "GEN"
+      ],
+      "category": "patriarchs",
+      "description": "The great flood and God's covenant with Noah, symbolised by the rainbow (Genesis 6\u20139).",
+      "dateRationale": "Based on Masoretic genealogies in Genesis 5 and 11. Ussher dated the flood to 2349 BC. The Septuagint genealogies produce a significantly later date around 3000 BC, used here as a round figure.",
+      "debate": "The historicity and universality of the flood is one of the most debated topics in biblical studies. Some scholars see it as a local Mesopotamian flood event behind the text. Archaeological evidence from the Black Sea and Mesopotamian flood layers (Woolley, 1929) is cited by different sides.",
+      "sources": [
+        {
+          "label": "Wenham \u2014 Word Biblical Commentary: Genesis 1\u201315",
+          "url": "https://www.logos.com/product/774/word-biblical-commentary-vol-1-genesis-1-15"
+        },
+        {
+          "label": "Walton & Longman \u2014 The Lost World of the Flood",
+          "url": "https://www.ivpress.com/the-lost-world-of-the-flood"
+        }
+      ]
+    },
+    {
+      "year": -2166,
+      "title": "Birth of Abraham",
+      "books": [
+        "GEN"
+      ],
+      "category": "patriarchs",
+      "description": "Abram born in Ur of the Chaldeans. Later renamed Abraham \u2014 father of many nations.",
+      "dateRationale": "Derived by working back from the Exodus (c.1446 BC) using the 430 years of Exodus 12:40 and the genealogical data of Genesis 11. The date 2166 BC is widely used in evangelical chronologies (Archer, Merrill).",
+      "debate": "Whether the patriarchal narratives reflect a specific historical period is debated. Kenneth Kitchen places Abraham in the Middle Bronze Age (2000\u20131500 BC) based on cultural parallels. John Van Seters argues for a much later composition with no historical core.",
+      "sources": [
+        {
+          "label": "Kitchen \u2014 On the Reliability of the Old Testament",
+          "url": "https://www.eerdmans.com/Products/0048/on-the-reliability-of-the-old-testament.aspx"
+        },
+        {
+          "label": "Merrill \u2014 Kingdom of Priests: A History of Old Testament Israel",
+          "url": "https://www.bakeracademic.com/978-0-8010-2562-0"
+        }
+      ]
+    },
+    {
+      "year": -2091,
+      "title": "Abraham called from Ur",
+      "books": [
+        "GEN"
+      ],
+      "category": "patriarchs",
+      "description": "God calls Abram to leave Ur and travel to Canaan. The beginning of the Abrahamic covenant.",
+      "dateRationale": "75 years after Abraham's birth (Genesis 12:4), placing the call around 2091 BC in the standard evangelical chronology.",
+      "debate": "The location of 'Ur of the Chaldeans' is itself debated \u2014 most scholars identify it with Tell el-Muqayyar in southern Iraq, but Cyrus Gordon argued for a northern Syrian Ur.",
+      "sources": [
+        {
+          "label": "Millard \u2014 Where Was Abraham's Ur?",
+          "url": "https://www.biblicalarchaeology.org/daily/biblical-sites-places/biblical-archaeology-sites/where-was-abrahams-ur/"
+        }
+      ]
+    },
+    {
+      "year": -1446,
+      "title": "The Exodus from Egypt",
+      "books": [
+        "EXO"
+      ],
+      "category": "exodus",
+      "description": "Moses leads Israel out of Egypt following the ten plagues. The defining event of Israel's national identity.",
+      "dateRationale": "The early date of 1446 BC is based on 1 Kings 6:1 which states Solomon's Temple was begun 480 years after the Exodus, plus the reference to the city of Ramesses in Exodus 1:11 (though this name may be anachronistic). The 15th century date aligns with the reign of Thutmose III or Amenhotep II.",
+      "debate": "This is one of the most contested dates in biblical archaeology. The late date of c.1290 BC aligns with the reign of Ramesses II and is favoured by many archaeologists (Hoffmeier, Redford). The early date (1446 BC) is defended by Kitchen, Merrill and others. Some scholars (Finkelstein, Silberman) question whether a large-scale Exodus occurred at all, noting the absence of Egyptian records.",
+      "sources": [
+        {
+          "label": "Hoffmeier \u2014 Israel in Egypt",
+          "url": "https://global.oup.com/academic/product/israel-in-egypt-9780195130881"
+        },
+        {
+          "label": "Kitchen \u2014 On the Reliability of the Old Testament",
+          "url": "https://www.eerdmans.com/Products/0048/on-the-reliability-of-the-old-testament.aspx"
+        },
+        {
+          "label": "Finkelstein & Silberman \u2014 The Bible Unearthed",
+          "url": "https://www.simonandschuster.com/books/The-Bible-Unearthed/Israel-Finkelstein/9780684869131"
+        }
+      ]
+    },
+    {
+      "year": -1406,
+      "title": "Israel enters Canaan",
+      "books": [
+        "JOS"
+      ],
+      "category": "conquest",
+      "description": "Joshua leads Israel across the Jordan into the Promised Land after 40 years in the wilderness.",
+      "dateRationale": "40 years after the Exodus (Numbers 14:33), placing the conquest around 1406 BC on the early date scheme.",
+      "debate": "The conquest narrative of Joshua has generated significant archaeological debate. The destruction layers at Jericho and Ai do not obviously correlate with a 15th century invasion. Bryant Wood has proposed revised dating of Jericho's destruction to fit the early date; others see the conquest as gradual infiltration rather than military campaign.",
+      "sources": [
+        {
+          "label": "Wood \u2014 Did the Israelites Conquer Jericho? A New Look at the Archaeological Evidence",
+          "url": "https://www.biblicalarchaeology.org/daily/biblical-sites-places/biblical-archaeology-sites/did-the-israelites-conquer-jericho/"
+        },
+        {
+          "label": "Younger \u2014 Ancient Conquest Accounts",
+          "url": "https://www.jstor.org/stable/j.ctt1cgf7mz"
+        }
+      ]
+    },
+    {
+      "year": -1050,
+      "title": "Saul becomes first King",
+      "books": [
+        "1SA"
+      ],
+      "category": "kingdom",
+      "description": "Israel demands a king. Saul anointed as Israel's first monarch by Samuel.",
+      "dateRationale": "Derived from working back from the well-established date of Solomon's Temple (966 BC), accounting for the reigns of David (40 years) and Saul (40 years per Acts 13:21).",
+      "debate": "The biblical account of the transition from judges to monarchy is studied extensively. Some scholars see the pro-monarchy and anti-monarchy traditions in 1 Samuel as reflecting later editorial tensions rather than historical narrative.",
+      "sources": [
+        {
+          "label": "Birch \u2014 The Rise of the Israelite Monarchy",
+          "url": "https://www.sbl-site.org/publications/Books_BookPage.aspx?N=333"
+        }
+      ]
+    },
+    {
+      "year": -1010,
+      "title": "David becomes King of Israel",
+      "books": [
+        "2SA"
+      ],
+      "category": "kingdom",
+      "description": "David becomes king over all Israel. Jerusalem established as capital. The Davidic covenant promised an eternal dynasty.",
+      "dateRationale": "One of the better-anchored dates in Israelite chronology. Working back from the Assyrian synchronisms which fix Ahab's death at 853 BC and using the Kings chronologies, David's reign is consistently placed around 1010\u2013970 BC.",
+      "debate": "The Tel Dan Inscription (1993) refers to the 'House of David' \u2014 the first extrabiblical mention of David, confirming he was a historical figure. However the scale of his empire as described in Samuel remains debated by archaeologists.",
+      "sources": [
+        {
+          "label": "Halpern \u2014 David's Secret Demons",
+          "url": "https://www.eerdmans.com/Products/2740/davids-secret-demons.aspx"
+        },
+        {
+          "label": "Tel Dan Inscription \u2014 Biblical Archaeology Society",
+          "url": "https://www.biblicalarchaeology.org/daily/biblical-artifacts/inscriptions/the-tel-dan-inscription-the-first-historical-evidence-of-the-david-dynasty/"
+        }
+      ]
+    },
+    {
+      "year": -966,
+      "title": "Solomon's Temple built",
+      "books": [
+        "1KI"
+      ],
+      "category": "kingdom",
+      "description": "Solomon begins construction of the First Temple in Jerusalem \u2014 the permanent dwelling place for the Ark of the Covenant.",
+      "dateRationale": "1 Kings 6:1 states the Temple was begun in the 480th year after the Exodus and the 4th year of Solomon's reign. Using the Assyrian synchronisms to anchor Solomon's reign, this gives approximately 966 BC \u2014 one of the most agreed dates in Israelite chronology.",
+      "debate": "The 480-year figure of 1 Kings 6:1 is either taken literally (supporting the early Exodus date of 1446 BC) or symbolically as 12 generations of 40 years (Bimson, Soggin). Archaeological evidence for a 10th century Jerusalem consistent with a major temple building project is debated.",
+      "sources": [
+        {
+          "label": "Mazar \u2014 Archaeology of the Land of the Bible",
+          "url": "https://www.jstor.org/stable/j.ctt1cgf7bm"
+        },
+        {
+          "label": "Galil \u2014 The Chronology of the Kings of Israel and Judah",
+          "url": "https://brill.com/view/title/3267"
+        }
+      ]
+    },
+    {
+      "year": -722,
+      "title": "Fall of Samaria \u2014 Northern Kingdom exiled",
+      "books": [
+        "2KI"
+      ],
+      "category": "exile",
+      "description": "Assyria under Shalmaneser V and Sargon II captures Samaria. The ten northern tribes are deported \u2014 the origin of the 'Lost Tribes' tradition.",
+      "dateRationale": "722 BC is one of the most firmly established dates in biblical history, confirmed by multiple Assyrian annals \u2014 Sargon II's own records describe the deportation of 27,290 inhabitants of Samaria.",
+      "debate": "The fate of the ten northern tribes has generated centuries of speculation. The 'British Israel' movement identified them with the British peoples; other theories suggest India, Ethiopia or Japan. Mainstream scholarship regards them as assimilated into Assyrian and later populations.",
+      "sources": [
+        {
+          "label": "Sargon II's Annals \u2014 ANET p.284-285",
+          "url": "https://www.jstor.org/stable/j.ctt1bh4bg0"
+        },
+        {
+          "label": "Cogan \u2014 The Raging Torrent: Historical Inscriptions from Assyria and Babylonia",
+          "url": "https://www.sbl-site.org/publications/Books_BookPage.aspx?N=535"
+        }
+      ]
+    },
+    {
+      "year": -586,
+      "title": "Jerusalem destroyed \u2014 Babylonian exile begins",
+      "books": [
+        "2KI",
+        "LAM",
+        "JER"
+      ],
+      "category": "exile",
+      "description": "Nebuchadnezzar destroys Solomon's Temple and Jerusalem. The population of Judah is deported to Babylon.",
+      "dateRationale": "586 BC is firmly anchored by the Babylonian Chronicles which record Nebuchadnezzar's campaigns. The destruction is independently confirmed by archaeological evidence at Lachish, Tel Batash and Jerusalem itself.",
+      "debate": "Some scholars prefer 587 BC based on slightly different calculations of Babylonian regnal years. The difference of one year reflects debates about how Babylonian accession-year reckoning is translated into our calendar.",
+      "sources": [
+        {
+          "label": "Babylonian Chronicles \u2014 British Museum",
+          "url": "https://www.britishmuseum.org/collection/object/W_1896-0401-9"
+        },
+        {
+          "label": "Finegan \u2014 Handbook of Biblical Chronology",
+          "url": "https://www.hendrickson.com/Products/9781565630529"
+        }
+      ]
+    },
+    {
+      "year": -539,
+      "title": "Cyrus conquers Babylon",
+      "books": [
+        "DAN",
+        "EZR"
+      ],
+      "category": "persia",
+      "description": "Cyrus the Great of Persia conquers Babylon, ending the Neo-Babylonian Empire. Daniel witnesses the fall.",
+      "dateRationale": "539 BC is one of the most precisely dated events in ancient history, confirmed by the Nabonidus Chronicle and the Cyrus Cylinder. The date is universally agreed.",
+      "debate": "The Cyrus Cylinder (British Museum) is often cited as confirming Cyrus's policy of allowing exiled peoples to return to their homelands, paralleling Ezra 1. Some scholars caution against reading Cyrus's decree as specifically directed at the Jews.",
+      "sources": [
+        {
+          "label": "Cyrus Cylinder \u2014 British Museum",
+          "url": "https://www.britishmuseum.org/collection/object/W_1880-0617-1941"
+        },
+        {
+          "label": "Kuhrt \u2014 The Achaemenid Persian Empire",
+          "url": "https://global.oup.com/academic/product/the-achaemenid-persian-empire-9780198143062"
+        }
+      ]
+    },
+    {
+      "year": -5,
+      "title": "Birth of Jesus",
+      "books": [
+        "MAT",
+        "LUK"
+      ],
+      "category": "new-testament",
+      "description": "Jesus born in Bethlehem of Judea during the reign of Herod the Great.",
+      "dateRationale": "The birth must predate Herod's death, which is generally placed at 4 BC based on Josephus and astronomical data (lunar eclipse). This places Jesus's birth between 6 and 4 BC \u2014 before the 'Year 1' of the Christian calendar, which was miscalculated by Dionysius Exiguus in the 6th century.",
+      "debate": "The date of Herod's death is itself debated. Filmer (1966) argued for 1 BC, which would allow a birth date of 1\u20132 BC. Most scholars accept 4 BC for Herod's death. The census of Luke 2 presents historical difficulties as no Roman census precisely matching Luke's description is documented for this period.",
+      "sources": [
+        {
+          "label": "Finegan \u2014 Handbook of Biblical Chronology",
+          "url": "https://www.hendrickson.com/Products/9781565630529"
+        },
+        {
+          "label": "Meier \u2014 A Marginal Jew: Rethinking the Historical Jesus",
+          "url": "https://yalebooks.yale.edu/book/9780300140187/marginal-jew-volume-one"
+        }
+      ]
+    },
+    {
+      "year": 30,
+      "title": "Crucifixion and Resurrection",
+      "books": [
+        "MAT",
+        "MRK",
+        "LUK",
+        "JHN"
+      ],
+      "category": "new-testament",
+      "description": "Jesus crucified under Pontius Pilate. Rises on the third day. The central event of Christian faith.",
+      "dateRationale": "Astronomical calculations show that Passover (14 Nisan) fell on a Friday in AD 30 and AD 33. Most scholars favour AD 30 or 33. The AD 30 date requires Jesus's ministry to begin around AD 27/28; AD 33 allows a longer ministry. Pilate was prefect AD 26\u201336, consistent with both dates.",
+      "debate": "AD 30 is favoured by Hoehner, Dodd and most British scholarship. AD 33 is favoured by Humphreys & Waddington based on lunar eclipse calculations. The date of 14 Nisan vs 15 Nisan (Synoptics vs John) is a separate but related chronological problem.",
+      "sources": [
+        {
+          "label": "Humphreys & Waddington \u2014 The Jewish Calendar and the Date of the Crucifixion",
+          "url": "https://www.tyndalehouse.com/tynbul/library/TynBull_1985_36_04_Humphreys_DateCrucifixion.pdf"
+        },
+        {
+          "label": "Hoehner \u2014 Chronological Aspects of the Life of Christ",
+          "url": "https://zondervanacademic.com/products/chronological-aspects-of-the-life-of-christ"
+        }
+      ]
+    },
+    {
+      "year": 70,
+      "title": "Destruction of Jerusalem",
+      "books": [
+        "REV"
+      ],
+      "category": "new-testament",
+      "description": "Roman general Titus destroys Jerusalem and the Second Temple. Over one million Jews killed according to Josephus. Fulfils Jesus's prophecy in Matthew 24.",
+      "dateRationale": "AD 70 is one of the most precisely documented events in ancient history. Josephus gives a detailed eyewitness account. The Arch of Titus in Rome, erected AD 81, depicts the spoils including the Temple menorah.",
+      "debate": "The destruction of the Temple is significant for New Testament dating \u2014 if the Gospels and Revelation were written after AD 70, the prophecies of Matthew 24 may be vaticinium ex eventu (prophecy after the fact). Conservative scholars date most NT books before AD 70 partly on these grounds.",
+      "sources": [
+        {
+          "label": "Josephus \u2014 The Jewish War",
+          "url": "https://www.gutenberg.org/ebooks/2850"
+        },
+        {
+          "label": "Robinson \u2014 Redating the New Testament",
+          "url": "https://www.amazon.com/Redating-New-Testament-John-Robinson/dp/1579101070"
+        }
+      ]
+    }
+  ],
+  "categories": [
+    {
+      "id": "creation",
+      "label": "Creation",
+      "color": "#4a90d9"
+    },
+    {
+      "id": "patriarchs",
+      "label": "Patriarchs",
+      "color": "#7b68ee"
+    },
+    {
+      "id": "exodus",
+      "label": "Exodus",
+      "color": "#e8a020"
+    },
+    {
+      "id": "law",
+      "label": "Law",
+      "color": "#e8a020"
+    },
+    {
+      "id": "conquest",
+      "label": "Conquest",
+      "color": "#e67e22"
+    },
+    {
+      "id": "judges",
+      "label": "Judges",
+      "color": "#c0392b"
+    },
+    {
+      "id": "kingdom",
+      "label": "Kingdom",
+      "color": "#8e44ad"
+    },
+    {
+      "id": "prophets",
+      "label": "Prophets",
+      "color": "#16a085"
+    },
+    {
+      "id": "exile",
+      "label": "Exile",
+      "color": "#c0392b"
+    },
+    {
+      "id": "persia",
+      "label": "Persian Period",
+      "color": "#2980b9"
+    },
+    {
+      "id": "intertestamental",
+      "label": "Intertestamental",
+      "color": "#7f8c8d"
+    },
+    {
+      "id": "new-testament",
+      "label": "New Testament",
+      "color": "#27ae60"
+    }
+  ]
+}

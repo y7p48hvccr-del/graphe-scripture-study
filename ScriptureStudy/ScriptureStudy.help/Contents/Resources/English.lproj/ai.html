@@ -1,0 +1,54 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
+<meta name="AppleTitle" content="AI Summaries">
+<title>AI Summaries — ScriptureStudy Help</title>
+<link rel="stylesheet" href="style.css"></head><body><nav>
+    <div class="logo">📖 ScriptureStudy</div>
+    <h2>Getting Started</h2>
+    <a href="index.html">Welcome</a>
+    <a href="quickstart.html">Quick Start</a>
+    <a href="modules.html">Installing Modules</a>
+    <h2>The Bible Panel</h2>
+    <a href="bible-panel.html">Navigation</a>
+    <a href="strongs.html">Strong's Numbers</a>
+    <a href="bookmarks.html">Bookmarks</a>
+    <h2>Companion Panel</h2>
+    <a href="comparison.html">Comparison</a>
+    <a href="commentary.html">Commentary</a>
+    <a href="dictionaries.html">Dictionaries</a>
+    <a href="notes-companion.html">Notes Tab</a>
+    <a href="web.html">Web Tab</a>
+    <h2>Organizer</h2>
+    <a href="notes.html">Writing Notes</a>
+    <a href="organizer-bookmarks.html">Bookmarks</a>
+    <h2>Tools</h2>
+    <a href="search.html">Search</a>
+    <a href="library.html">Module Library</a>
+    <a href="ai.html">AI Summaries</a>
+    <h2>Customisation</h2>
+    <a href="themes.html">Themes &amp; Fonts</a>
+    <a href="settings.html">Settings</a>
+    <h2>Reference</h2>
+    <a href="shortcuts.html">Keyboard Shortcuts</a>
+    <a href="formats.html">Module Formats</a>
+    <a href="troubleshooting.html">Troubleshooting</a>
+</nav><article>
+<h1>AI Summaries</h1>
+<p class="subtitle">Generate intelligent chapter summaries using Claude or a local Ollama model.</p>
+<h2>Claude (Anthropic)</h2>
+<p>ScriptureStudy can use Anthropic's Claude AI to generate chapter summaries. To enable this:</p>
+<ol>
+    <li>Obtain an API key from <a href="https://console.anthropic.com">console.anthropic.com</a></li>
+    <li>Open <strong>Settings → AI Engine — Claude</strong></li>
+    <li>Paste your API key into the field provided</li>
+</ol>
+<p>Summaries are generated on demand and are charged against your Anthropic API account at standard rates.</p>
+<h2>Ollama (local)</h2>
+<p>If you prefer to keep your data entirely on your Mac, ScriptureStudy supports <a href="https://ollama.com">Ollama</a> — a free tool that runs open-source AI models locally. To set it up:</p>
+<ol>
+    <li>Install Ollama from <a href="https://ollama.com">ollama.com</a></li>
+    <li>Pull a model — <code>ollama pull llama3</code> is a good starting point</li>
+    <li>In <strong>Settings → AI Engine — Ollama</strong>, enter your model name and server URL (default: <code>http://localhost:11434</code>)</li>
+</ol>
+<p>Ollama runs entirely offline — no data leaves your Mac.</p>
+<h2>Auto-generate summaries</h2>
+<p>Enable <strong>Settings → Behaviour → Auto-generate summaries</strong> to generate a summary automatically each time you open a new chapter. With this off, summaries are only generated when you explicitly request one.</p></article></body></html>
