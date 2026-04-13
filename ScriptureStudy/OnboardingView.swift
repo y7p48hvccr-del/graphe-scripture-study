@@ -14,20 +14,38 @@ struct OnboardingView: View {
     private let pages: [(icon: String, title: String, body: String, action: String?)] = [
         (
             icon: "book.fill",
-            title: "Welcome to ScriptureStudy",
-            body: "A focused Bible study environment for Mac. Everything you need is one tap away — cross-references, commentaries, notes, devotionals and more.",
+            title: "Welcome to Graphē ScriptureStudy Pro",
+            body: "A focused Bible study environment for Mac. Bible reading, commentaries, cross-references, interlinear, notes, devotionals, maps, and an AI study assistant — all in one place.",
             action: nil
         ),
         (
             icon: "folder.badge.plus",
             title: "Add your modules",
-            body: "ScriptureStudy reads MyBible-format files. Go to the Archives tab and tap Choose Modules Folder to point the app to your collection. Hundreds of free modules are available at mybible.zone.",
-            action: "Open Library"
+            body: "Graphē reads MyBible-format SQLite files. Go to the Archives tab and tap Choose Modules Folder to point the app to your collection.\n\nHundreds of free modules — Bibles, commentaries, lexicons, devotionals — are available at mybible.zone.",
+            action: "Open Archives"
         ),
         (
             icon: "hand.tap.fill",
-            title: "Reading is simple",
-            body: "Tap a verse number to select it — cross-references load automatically in the panel alongside.\n\nLong-press a verse number to create a personal note anchored to that verse.\n\nTap any word to look up its original Hebrew or Greek meaning.",
+            title: "Reading the Bible",
+            body: "Tap a verse number to select it — commentary and cross-references load automatically in the Companion Panel alongside.\n\nLong-press a verse number to create a personal note anchored to that verse.\n\nTap any word in a Strong's-tagged Bible to look up its original Hebrew or Greek meaning.",
+            action: nil
+        ),
+        (
+            icon: "note.text",
+            title: "Notes & Organizer",
+            body: "Every note is anchored to a verse and syncs to iCloud. The Organizer tab keeps your calendar, reading plan, prayer reminders and notes together in one view.\n\nAdd portrait photos of family, friends and prayer partners to keep them in mind as you study.",
+            action: nil
+        ),
+        (
+            icon: "books.vertical.fill",
+            title: "Books Library",
+            body: "The Books tab holds your EPUB and PDF reading library. Search inside your books to find any word or phrase across your entire collection.\n\nThe Discover tab links to free resources including Monergism, CCEL, and Standard Ebooks.",
+            action: nil
+        ),
+        (
+            icon: "gearshape.fill",
+            title: "Make it yours",
+            body: "Choose from five themes, pick your font and size, and adjust the filigree accent colour. Settings also lets you connect an AI engine — Anthropic's Claude via API key, or Ollama running locally on your Mac.",
             action: nil
         ),
     ]
@@ -45,6 +63,7 @@ struct OnboardingView: View {
                 .buttonStyle(.plain)
                 .padding(.top, 12).padding(.trailing, 16)
             }
+
             // Page content
             TabView(selection: $page) {
                 ForEach(Array(pages.enumerated()), id: \.offset) { idx, p in
@@ -119,7 +138,7 @@ struct OnboardingView: View {
             .padding(20)
             .background(Color.platformWindowBg)
         }
-        .frame(width: 460, height: 400)
+        .frame(width: 480, height: 420)
     }
 
     private func pageView(_ p: (icon: String, title: String, body: String, action: String?), index: Int) -> some View {
@@ -130,11 +149,11 @@ struct OnboardingView: View {
                 .foregroundStyle(filigreeAccent)
 
             Text(p.title)
-                .font(.system(size: 22, weight: .bold))
+                .font(.system(size: 20, weight: .bold))
                 .multilineTextAlignment(.center)
 
             Text(p.body)
-                .font(.system(size: 14))
+                .font(.system(size: 13))
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .lineSpacing(4)
@@ -149,7 +168,7 @@ struct OnboardingView: View {
                 }
                 .foregroundStyle(filigreeAccent)
                 .buttonStyle(.plain)
-                .font(.system(size: 14, weight: .medium))
+                .font(.system(size: 13, weight: .medium))
             }
             Spacer()
         }

@@ -6,6 +6,7 @@ struct LaunchScreenView: View {
 
     @State private var scale:   CGFloat = 0.3
     @State private var opacity: Double  = 0.0
+    @State private var fadeScale: CGFloat = 1.0
 
     private let skyBlue = Color(red: 0.659, green: 0.784, blue: 0.878)
     private let gold    = Color(red: 0.784, green: 0.663, blue: 0.431)
@@ -16,7 +17,7 @@ struct LaunchScreenView: View {
             VStack(spacing: 20) {
                 LogoView()
                     .frame(width: 200, height: 200)
-                    .scaleEffect(scale)
+                    .scaleEffect(scale * fadeScale)
                     .opacity(opacity)
                 VStack(spacing: 6) {
                     Text("Graph\u{0113}")
@@ -39,13 +40,18 @@ struct LaunchScreenView: View {
     }
 
     private func runAnimation() {
-        withAnimation(.easeOut(duration: 0.7)) {
-            scale   = 1.2
+        // Entrance — slow gentle rise over 1.8 seconds
+        withAnimation(.easeOut(duration: 1.8)) {
+            scale   = 1.0
             opacity = 1.0
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) {
-            withAnimation(.easeIn(duration: 0.6)) { opacity = 0 }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.65) { onComplete() }
+        // Hold briefly, then fade while continuing to grow
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.2) {
+            withAnimation(.easeOut(duration: 1.8)) {
+                opacity   = 0.0
+                fadeScale = 1.5   // grows to 1.5× while fading
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.85) { onComplete() }
         }
     }
 }

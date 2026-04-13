@@ -14,6 +14,7 @@ struct EPUBReaderView: View {
     let epubURL: URL
     var initialHref:        String? = nil
     var initialSearchQuery: String? = nil
+    var initialScrollY:     Double  = 0
 
     @EnvironmentObject var myBible: MyBibleService
 
@@ -250,27 +251,32 @@ struct EPUBReaderView: View {
     }
 
     private func parseBook() {
+        let epubURL = self.epubURL
+        let didStart = epubURL.startAccessingSecurityScopedResource()
         Task.detached(priority: .userInitiated) {
-            // Open the archive a single time — reused for both metadata parsing
-            // and all subsequent page rendering.  Previously a second Archive was
-            // opened inside EPUBParser.parse, causing two simultaneous decompressed
-            // central directories + cover extraction (code-9 / memory-kill trigger).
-            guard let arc = try? Archive(url: epubURL, accessMode: .read, pathEncoding: nil) else {
-                await MainActor.run { isParsing = false }
-                return
-            }
-            let parsed = EPUBParser.parse(url: epubURL)
+            defer { if didStart { epubURL.stopAccessingSecurityScopedResource() } }
+            let arc: Archive? = {
+                do {
+                    let a = try Archive(url: epubURL, accessMode: .read, pathEncoding: nil)
+                    return a
+                } catch {
+                    return nil
+                }
+            }()
+            let parsed = arc != nil ? EPUBParser.parse(url: epubURL, archive: arc!) : EPUBParser.parse(url: epubURL)
             await MainActor.run {
                 archive   = arc
                 book      = parsed
                 isParsing = false
                 if let b = parsed {
                     toc = b.toc
-                    // If opened from a search result, jump to that chapter
                     if let href = initialHref, !href.isEmpty {
                         currentHref  = href
                         currentTitle = findTOCItem(href: href, in: b.toc)?.title ?? ""
-                        // Auto-trigger in-reader search after a brief delay for page load
+                        // Restore scroll position if provided (e.g. opened from bookmark)
+                        if initialScrollY > 0 {
+                            restoreScrollY = initialScrollY
+                        }
                         if let q = initialSearchQuery, !q.isEmpty {
                             DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
                                 searchQuery = q

@@ -134,7 +134,7 @@ struct DiscoverView: View {
     // MARK: - Source Picker
 
     private var sourcePicker: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
+        ScrollView(.horizontal, showsIndicators: true) {
             HStack(spacing: 8) {
                 ForEach(discoverSources) { source in
                     Button {

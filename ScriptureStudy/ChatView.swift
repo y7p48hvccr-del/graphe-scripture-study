@@ -65,7 +65,7 @@ struct ChatView: View {
 
             // Suggestion chips (shown when no conversation yet)
             if messages.isEmpty && ollama.chapterSummary.isEmpty {
-                ScrollView(.horizontal, showsIndicators: false) {
+                ScrollView(.horizontal, showsIndicators: true) {
                     HStack(spacing: 8) {
                         ForEach(suggestions, id: \.self) { s in
                             Button(s) { inputText = s; Task { await send() } }

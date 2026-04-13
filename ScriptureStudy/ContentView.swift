@@ -6,8 +6,6 @@ struct ContentView: View {
     @StateObject private var bmapsService       = BMapsService()
     @StateObject private var interlinearService = InterlinearService()
 
-    @AppStorage("textureOn")         private var textureOn:         Bool   = true
-    @AppStorage("textureIntensity")  private var textureIntensity:  Double = 0.6
     @AppStorage("themeID")           private var themeID:           String = "light"
     @AppStorage("filigreeOn")        private var filigreeOn:        Bool   = true
     @AppStorage("filigreeColor")     private var filigreeColor:     Int    = 0
@@ -33,20 +31,17 @@ struct ContentView: View {
                 if filigreeOn {
                     FiligreeDecoration(colorIndex: filigreeColor, intensity: filigreeIntensity)
                 }
-                if textureOn {
-                    GrainTextureView(intensity: textureIntensity, themeID: themeID)
-                }
 
                 TabView(selection: $selectedTab) {
-                    ZStack { LocalBibleView() }
+                    ZStack { Color.white; LocalBibleView() }
                         .tabItem { Label("Bible",       systemImage: "book.fill") }.tag(0)
                     ZStack { ChatView() }
                         .tabItem { Label("Chat",        systemImage: "bubble.left.and.bubble.right.fill") }.tag(10)
-                    ZStack { DevotionalView() }
+                    ZStack { Color.white; DevotionalView() }
                         .tabItem { Label("Devotional",  systemImage: "book.closed.fill") }.tag(8)
                     ZStack { OrganizerView() }
                         .tabItem { Label("Organizer",   systemImage: "calendar") }.tag(4)
-                    ZStack { SearchView() }
+                    ZStack { Color.white; SearchView() }
                         .tabItem { Label("Search",      systemImage: "magnifyingglass") }.tag(5)
                     ZStack { ModuleLibraryView() }
                         .tabItem { Label("Archives",    systemImage: "books.vertical.fill") }.tag(6)

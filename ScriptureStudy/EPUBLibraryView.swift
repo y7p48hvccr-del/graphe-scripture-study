@@ -47,10 +47,13 @@ final class CoverStore: ObservableObject {
 
 
 struct EPUBLibraryView: View {
-    @AppStorage("epubFolder")    private var epubFolder:    String = ""
-    @AppStorage("filigreeColor") private var filigreeColor: Int    = 0
-    @AppStorage("themeID")       private var themeID:       String = "light"
+    @AppStorage("epubFolder")           private var epubFolder:       String = ""
+    @AppStorage("epubFolderBookmark")   private var epubFolderBookmarkData: Data = Data()
+    @AppStorage("filigreeColor")        private var filigreeColor:    Int    = 0
+    @AppStorage("themeID")              private var themeID:          String = "light"
     @StateObject private var coverStore = CoverStore()
+    // Retained security-scoped URL so the scope stays open while the view is alive
+    @State private var securedFolderURL: URL? = nil
     var theme:          AppTheme { AppTheme.find(themeID) }
     var filigreeAccent: Color { resolvedFiligreeAccent(colorIndex: filigreeColor, themeID: themeID) }
 
@@ -61,6 +64,7 @@ struct EPUBLibraryView: View {
     @State private var selectedFormat:       BookFormat? = nil
     @State private var selectedInitialHref:  String?     = nil
     @State private var selectedSearchQuery:  String?     = nil
+    @State private var selectedInitialScrollY: Double    = 0
     @State private var bookToDelete:   BookFile?   = nil
     @State private var showingImportPicker: Bool   = false
     @State private var activeTab:           String = "mybooks"
@@ -72,6 +76,8 @@ struct EPUBLibraryView: View {
     @AppStorage("epubViewMode")   private var viewMode:       String = "large"
     @AppStorage("epubSortOrder")  private var sortOrder:      String = "title"
     @AppStorage("epubLastOpened")  private var lastOpenedData:  Data   = Data()
+    @State private var allEpubBookmarks: [(book: BookFile, bookmark: EPUBBookmark)] = []
+    @State private var formatFilter: String = "all"  // "all", "epub", "pdf"
 
     var sortedBooks: [BookFile] {
         switch sortOrder {
@@ -95,9 +101,16 @@ struct EPUBLibraryView: View {
     }
 
     var filteredBooks: [BookFile] {
-        guard !searchText.isEmpty else { return sortedBooks }
+        // Apply format filter first
+        let formatFiltered: [BookFile]
+        switch formatFilter {
+        case "epub": formatFiltered = sortedBooks.filter { $0.format.isEPUB }
+        case "pdf":  formatFiltered = sortedBooks.filter { $0.format.isPDF }
+        default:     formatFiltered = sortedBooks
+        }
+        guard !searchText.isEmpty else { return formatFiltered }
         let q = searchText.lowercased()
-        return sortedBooks.filter {
+        return formatFiltered.filter {
             cleanTitle($0.url).lowercased().contains(q) ||
             authorName($0.url).lowercased().contains(q)
         }
@@ -145,12 +158,13 @@ struct EPUBLibraryView: View {
                     } else {
                         EPUBReaderView(epubURL: url,
                                        initialHref: selectedInitialHref,
-                                       initialSearchQuery: selectedSearchQuery)
+                                       initialSearchQuery: selectedSearchQuery,
+                                       initialScrollY: selectedInitialScrollY)
                     }
                 }
                 .toolbar {
                     ToolbarItem(placement: .navigation) {
-                        Button { selectedURL = nil; selectedFormat = nil; selectedInitialHref = nil; selectedSearchQuery = nil } label: {
+                        Button { selectedURL = nil; selectedFormat = nil; selectedInitialHref = nil; selectedSearchQuery = nil; selectedInitialScrollY = 0 } label: {
                             Label("Archives", systemImage: "chevron.left")
                         }
                     }
@@ -166,15 +180,19 @@ struct EPUBLibraryView: View {
                     .pickerStyle(.segmented)
                     .padding(.horizontal, 16)
                     .padding(.vertical, 8)
+                    .background(Color.platformWindowBg)
 
                     Divider()
 
                     if activeTab == "mybooks" {
                         libraryView
+                            .background(Color.platformWindowBg)
                     } else if activeTab == "magazines" {
                         MagazinesView(booksFolder: epubFolder)
+                            .background(Color.platformWindowBg)
                     } else {
                         DiscoverView()
+                            .background(Color.platformWindowBg)
                             .onDisappear { }
                     }
                 }
@@ -204,7 +222,16 @@ struct EPUBLibraryView: View {
             }
             .navigationTitle("Books")
             .background(theme.background)
-            .onAppear { if !epubFolder.isEmpty && epubURLs.isEmpty { scan() } }
+            .onAppear {
+                resolveSecuredFolder()
+                if !epubFolder.isEmpty && epubURLs.isEmpty { scan() }
+            }
+            .onDisappear {
+                // Do NOT stop the security scope here — EPUBReaderView is presented
+                // by replacing this view in the same Group, so onDisappear fires when
+                // the user opens a book. Stopping the scope here kills file access
+                // in the reader. The scope is released when the app terminates.
+            }
             .alert("Delete Book", isPresented: Binding(
                 get: { bookToDelete != nil },
                 set: { if !$0 { bookToDelete = nil } }
@@ -289,189 +316,416 @@ struct EPUBLibraryView: View {
 
     @ViewBuilder
     private var bookGrid: some View {
-        VStack(spacing: 0) {
-            // Search bar with mode toggle
-            VStack(spacing: 0) {
-                HStack(spacing: 8) {
-                    Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                    TextField(bookSearch.isSearching || !bookSearch.lastQuery.isEmpty || searchMode == "inside"
-                              ? "Search inside books…"
-                              : "Search by title or author…",
-                              text: $searchText)
-                        .textFieldStyle(.plain)
-                        .onSubmit { if searchMode == "inside" { triggerInsideSearch() } }
-                    if bookSearch.isSearching {
-                        ProgressView().controlSize(.small)
-                    } else if !searchText.isEmpty {
-                        if searchMode == "inside" {
-                            Button {
-                                triggerInsideSearch()
-                            } label: {
-                                Text("Search")
-                                    .font(.system(size: 11, weight: .medium))
-                                    .padding(.horizontal, 8).padding(.vertical, 3)
-                                    .background(filigreeAccent)
-                                    .foregroundStyle(.white)
-                                    .clipShape(Capsule())
-                            }.buttonStyle(.plain)
-                        }
-                        Button { searchText = ""; bookSearch.cancel() } label: {
-                            Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
-                        }.buttonStyle(.plain)
-                    }
-                }
-                .padding(.horizontal, 12).padding(.vertical, 8)
-
-                // Mode toggle
-                HStack(spacing: 0) {
-                    ForEach([("title", "Title & Author"), ("inside", "Inside Books")], id: \.0) { mode, label in
-                        Button {
-                            searchMode = mode
-                            searchText = ""
-                            bookSearch.cancel()
-                        } label: {
-                            Text(label)
-                                .font(.system(size: 11, weight: .medium))
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 5)
-                                .background(searchMode == mode ? filigreeAccent.opacity(0.15) : Color.clear)
-                                .foregroundStyle(searchMode == mode ? filigreeAccent : Color.secondary)
-                        }
-                        .buttonStyle(.plain)
-                        if mode == "title" {
-                            Divider().frame(height: 20)
-                        }
-                    }
-                }
-                .background(Color.platformWindowBg)
-            }
+        HStack(alignment: .top, spacing: 0) {
+            // MARK: Main book area (2/3 width)
+            bookMainArea
+                .frame(maxWidth: .infinity)
 
             Divider()
 
-            if searchMode == "inside" && (!bookSearch.results.isEmpty || bookSearch.isSearching || !bookSearch.lastQuery.isEmpty) {
-                // Inside-books search results
-                if bookSearch.isSearching {
-                    VStack { Spacer(); ProgressView("Searching \(bookFiles.filter { $0.format.isEPUB }.count) books…"); Spacer() }
-                } else if bookSearch.results.isEmpty {
-                    VStack { Spacer(); Text("No results for \u{201C}\(bookSearch.lastQuery)\u{201D}").foregroundStyle(.secondary); Spacer() }
-                } else {
-                    List {
-                        ForEach(bookSearch.results) { result in
-                            Button {
-                                selectedInitialHref  = result.href
-                                selectedSearchQuery  = bookSearch.lastQuery
-                                selectedURL    = result.bookURL
-                                selectedFormat = .epub
-                            } label: {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    HStack {
-                                        Text(result.bookTitle)
-                                            .font(.system(size: 13, weight: .semibold))
-                                            .lineLimit(1)
-                                        Spacer()
-                                        Text(result.chapterTitle)
-                                            .font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                                    }
-                                    Text(result.snippet)
-                                        .font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(3)
+            // MARK: Right panel — search + bookmarks (1/3 width)
+            bookSidePanel
+                .frame(width: 260)
+        }
+    }
+
+    // MARK: - Main Book Area
+
+    @ViewBuilder
+    private var bookMainArea: some View {
+        if searchMode == "inside" && (!bookSearch.results.isEmpty || bookSearch.isSearching || !bookSearch.lastQuery.isEmpty) {
+            if bookSearch.isSearching {
+                VStack { Spacer(); ProgressView("Searching \(bookFiles.filter { $0.format.isEPUB }.count) books…"); Spacer() }
+            } else if bookSearch.results.isEmpty {
+                VStack { Spacer(); Text("No results for \u{201C}\(bookSearch.lastQuery)\u{201D}").foregroundStyle(.secondary); Spacer() }
+            } else {
+                List {
+                    ForEach(bookSearch.results) { result in
+                        Button {
+                            selectedInitialHref  = result.href
+                            selectedSearchQuery  = bookSearch.lastQuery
+                            selectedURL    = result.bookURL
+                            selectedFormat = .epub
+                        } label: {
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack {
+                                    Text(result.bookTitle)
+                                        .font(.system(size: 13, weight: .semibold))
+                                        .lineLimit(1)
+                                    Spacer()
+                                    Text(result.chapterTitle)
+                                        .font(.caption).foregroundStyle(.secondary).lineLimit(1)
                                 }
-                                .padding(.vertical, 4)
+                                Text(result.snippet)
+                                    .font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(3)
+                            }
+                            .padding(.vertical, 4)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+        } else if filteredBooks.isEmpty {
+            VStack {
+                Spacer()
+                Text(searchText.isEmpty ? "No books" : "No results for \u{201C}\(searchText)\u{201D}")
+                    .foregroundStyle(.secondary)
+                Spacer()
+            }
+        } else if viewMode == "list" {
+            ScrollView {
+                LazyVStack(spacing: 0) {
+                    ForEach(filteredBooks) { book in
+                        HStack(spacing: 0) {
+                            BookListRow(url: book.url, format: book.format, accent: filigreeAccent,
+                                        cover: coverStore.covers[book.url.path],
+                                        isNew: newBookNames.contains(book.url.lastPathComponent))
+                                .onTapGesture { openBook(book) }
+                                .onAppear { coverStore.loadCover(for: book.url) }
+                            Button { bookToDelete = book } label: {
+                                Image(systemName: "trash")
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(.white)
+                                    .padding(5)
+                                    .background(Color.red.opacity(0.7))
+                                    .clipShape(RoundedRectangle(cornerRadius: 5))
                             }
                             .buttonStyle(.plain)
+                            .padding(.trailing, 10)
+                            .help("Delete this book")
                         }
+                        Divider().padding(.leading, 56)
                     }
                 }
-            } else if filteredBooks.isEmpty {
-                VStack {
-                    Spacer()
-                    Text(searchText.isEmpty ? "No books" : "No results for \u{201C}\(searchText)\u{201D}")
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                }
-            } else if viewMode == "list" {
-                // List mode — no A-Z bar needed, just scroll
-                ScrollView {
-                    LazyVStack(spacing: 0) {
-                        ForEach(filteredBooks) { book in
-                            HStack(spacing: 0) {
-                                BookListRow(url: book.url, format: book.format, accent: filigreeAccent,
-                                            cover: coverStore.covers[book.url.path],
-                                            isNew: newBookNames.contains(book.url.lastPathComponent))
-                                    .onTapGesture { openBook(book) }
-                                    .onAppear { coverStore.loadCover(for: book.url) }
-                                Button { bookToDelete = book } label: {
-                                    Image(systemName: "trash")
-                                        .font(.system(size: 13))
-                                        .foregroundStyle(.red.opacity(0.7))
+            }
+        } else {
+            HStack(alignment: .top, spacing: 0) {
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 0) {
+                            ForEach(booksByLetter, id: \.letter) { group in
+                                Text(group.letter)
+                                    .font(.system(size: 10, weight: .semibold))
+                                    .foregroundStyle(.secondary)
+                                    .padding(.horizontal, 20)
+                                    .padding(.top, 16)
+                                    .padding(.bottom, 6)
+                                    .id("letter_\(group.letter)")
+
+                                let cols = viewMode == "small"
+                                    ? [GridItem(.adaptive(minimum: 90, maximum: 110), spacing: 10)]
+                                    : [GridItem(.adaptive(minimum: 140, maximum: 180), spacing: 16)]
+                                let sz: BookTileSize = viewMode == "small" ? .small : .large
+                                LazyVGrid(columns: cols, spacing: viewMode == "small" ? 12 : 20) {
+                                    ForEach(group.books) { book in
+                                        bookTile(book, size: sz)
+                                    }
+                                }
+                                .padding(.horizontal, viewMode == "small" ? 16 : 20)
+                                .padding(.bottom, viewMode == "small" ? 4 : 8)
+                            }
+                        }
+                        .padding(.bottom, 20)
+                    }
+                    .onChange(of: searchText) { _ in
+                        if let first = booksByLetter.first {
+                            proxy.scrollTo("letter_\(first.letter)", anchor: .top)
+                        }
+                    }
+                    .overlay(alignment: .trailing) {
+                        VStack(spacing: 1) {
+                            ForEach(booksByLetter, id: \.letter) { group in
+                                Button {
+                                    withAnimation { proxy.scrollTo("letter_\(group.letter)", anchor: .top) }
+                                } label: {
+                                    Text(group.letter)
+                                        .font(.system(size: 9, weight: .semibold))
+                                        .foregroundStyle(filigreeAccent)
+                                        .frame(width: 16)
                                 }
                                 .buttonStyle(.plain)
-                                .padding(.trailing, 12)
-                                .help("Delete this book")
-                            }
-                            Divider().padding(.leading, 56)
-                        }
-                    }
-                }
-            } else {
-                // Grid modes — with A-Z jump bar
-                HStack(alignment: .top, spacing: 0) {
-                    ScrollViewReader { proxy in
-                        ScrollView {
-                            VStack(alignment: .leading, spacing: 0) {
-                                ForEach(booksByLetter, id: \.letter) { group in
-                                    // Section header
-                                    Text(group.letter)
-                                        .font(.system(size: 10, weight: .semibold))
-                                        .foregroundStyle(.secondary)
-                                        .padding(.horizontal, 20)
-                                        .padding(.top, 16)
-                                        .padding(.bottom, 6)
-                                        .id("letter_\(group.letter)")
-
-                                    // Books in section
-                                    let cols = viewMode == "small"
-                                        ? [GridItem(.adaptive(minimum: 90, maximum: 110), spacing: 10)]
-                                        : [GridItem(.adaptive(minimum: 140, maximum: 180), spacing: 16)]
-                                    let sz: BookTileSize = viewMode == "small" ? .small : .large
-                                    LazyVGrid(columns: cols, spacing: viewMode == "small" ? 12 : 20) {
-                                        ForEach(group.books) { book in
-                                            bookTile(book, size: sz)
-                                        }
-                                    }
-                                    .padding(.horizontal, viewMode == "small" ? 16 : 20)
-                                    .padding(.bottom, viewMode == "small" ? 4 : 8)
-                                }
-                            }
-                            .padding(.bottom, 20)
-                        }
-                        .onChange(of: searchText) { _ in
-                            if let first = booksByLetter.first {
-                                proxy.scrollTo("letter_\(first.letter)", anchor: .top)
                             }
                         }
-                        .overlay(alignment: .trailing) {
-                            // A-Z jump bar
-                            VStack(spacing: 1) {
-                                ForEach(booksByLetter, id: \.letter) { group in
-                                    Button {
-                                        withAnimation { proxy.scrollTo("letter_\(group.letter)", anchor: .top) }
-                                    } label: {
-                                        Text(group.letter)
-                                            .font(.system(size: 9, weight: .semibold))
-                                            .foregroundStyle(filigreeAccent)
-                                            .frame(width: 16)
-                                    }
-                                    .buttonStyle(.plain)
-                                }
-                            }
-                            .padding(.vertical, 8)
-                            .padding(.trailing, 4)
-                        }
+                        .padding(.vertical, 8)
+                        .padding(.trailing, 4)
                     }
                 }
             }
         }
     }
+
+    // MARK: - Right Side Panel
+
+    private var bookSidePanel: some View {
+        VStack(spacing: 0) {
+            // Search section
+            VStack(spacing: 0) {
+                Text("SEARCH")
+                    .font(.system(size: 9, weight: .semibold))
+                    .kerning(1.0)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 12)
+                    .padding(.top, 12)
+                    .padding(.bottom, 6)
+
+                // Search field
+                HStack(spacing: 6) {
+                    Image(systemName: "magnifyingglass").foregroundStyle(.secondary).font(.system(size: 12))
+                    TextField(searchMode == "inside" ? "Search inside books…" : "Search title or author…",
+                              text: $searchText)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 12))
+                        .onSubmit { if searchMode == "inside" { triggerInsideSearch() } }
+                    if bookSearch.isSearching {
+                        ProgressView().controlSize(.small)
+                    } else if !searchText.isEmpty {
+                        if searchMode == "inside" {
+                            Button { triggerInsideSearch() } label: {
+                                Text("Go").font(.system(size: 10, weight: .semibold))
+                                    .foregroundStyle(.white)
+                                    .padding(.horizontal, 6).padding(.vertical, 2)
+                                    .background(filigreeAccent)
+                                    .clipShape(Capsule())
+                            }.buttonStyle(.plain)
+                        }
+                        Button { searchText = ""; bookSearch.cancel() } label: {
+                            Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary).font(.system(size: 12))
+                        }.buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
+                .background(Color.secondary.opacity(0.07))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .padding(.horizontal, 10)
+
+                // Mode buttons
+                HStack(spacing: 6) {
+                    ForEach([("title", "Title & Author", "textformat"),
+                             ("inside", "Inside Books", "text.magnifyingglass")], id: \.0) { mode, label, icon in
+                        Button {
+                            searchMode = mode
+                            searchText = ""
+                            bookSearch.cancel()
+                        } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: icon).font(.system(size: 9))
+                                Text(label).font(.system(size: 10, weight: .medium))
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 5)
+                            .background(searchMode == mode ? filigreeAccent : Color.secondary.opacity(0.10))
+                            .foregroundStyle(searchMode == mode ? .white : Color.secondary)
+                            .clipShape(RoundedRectangle(cornerRadius: 6))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 10)
+                .padding(.top, 8)
+                .padding(.bottom, 12)
+            }
+            .background(Color.platformWindowBg)
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: 8)
+                .stroke(Color.primary.opacity(0.35), lineWidth: 0.75))
+            .padding(10)
+
+            Divider()
+
+            // Format filter section
+            VStack(spacing: 0) {
+                Text("FILTER")
+                    .font(.system(size: 9, weight: .semibold))
+                    .kerning(1.0)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 12)
+                    .padding(.top, 12)
+                    .padding(.bottom, 8)
+
+                let epubCount = bookFiles.filter { $0.format.isEPUB }.count
+                let pdfCount  = bookFiles.filter { $0.format.isPDF }.count
+                let allCount  = bookFiles.count
+
+                ForEach([
+                    ("all",  "All Files",   "\(allCount)",  "books.vertical"),
+                    ("epub", "EPUB",        "\(epubCount)", "book"),
+                    ("pdf",  "PDF",         "\(pdfCount)",  "doc.richtext"),
+                ], id: \.0) { filter, label, count, icon in
+                    Button { formatFilter = filter } label: {
+                        HStack(spacing: 8) {
+                            // Radio indicator
+                            Circle()
+                                .fill(formatFilter == filter ? filigreeAccent : Color.clear)
+                                .frame(width: 8, height: 8)
+                                .overlay(Circle().stroke(
+                                    formatFilter == filter ? filigreeAccent : Color.secondary.opacity(0.5),
+                                    lineWidth: 1.5))
+                            Image(systemName: icon)
+                                .font(.system(size: 11))
+                                .foregroundStyle(formatFilter == filter ? filigreeAccent : .secondary)
+                                .frame(width: 16)
+                            Text(label)
+                                .font(.system(size: 12, weight: formatFilter == filter ? .semibold : .regular))
+                                .foregroundStyle(formatFilter == filter ? .primary : .secondary)
+                            Spacer()
+                            Text(count)
+                                .font(.system(size: 11, design: .rounded))
+                                .foregroundStyle(.secondary)
+                                .padding(.horizontal, 6).padding(.vertical, 1)
+                                .background(Color.secondary.opacity(0.1))
+                                .clipShape(Capsule())
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.bottom, 8)
+
+            Divider()
+
+            // New Books section
+            let newBooks = bookFiles.filter { newBookNames.contains($0.url.lastPathComponent) }
+            if !newBooks.isEmpty {
+                VStack(spacing: 0) {
+                    HStack {
+                        Text("NEW")
+                            .font(.system(size: 9, weight: .semibold))
+                            .kerning(1.0)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Text("\(newBooks.count)")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 5).padding(.vertical, 1)
+                            .background(filigreeAccent)
+                            .clipShape(Capsule())
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.top, 12)
+                    .padding(.bottom, 6)
+
+                    ForEach(newBooks) { book in
+                        Button { openBook(book) } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: "sparkle")
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(filigreeAccent)
+                                Text(cleanTitle(book.url))
+                                    .font(.system(size: 11))
+                                    .lineLimit(2)
+                                    .foregroundStyle(.primary)
+                                Spacer()
+                                Text(book.format.label)
+                                    .font(.system(size: 8, weight: .bold))
+                                    .foregroundStyle(.secondary)
+                            }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 5)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        Divider().padding(.leading, 30)
+                    }
+                }
+                .padding(.bottom, 8)
+
+                Divider()
+            }
+
+            // Bookmarks section
+            VStack(spacing: 0) {
+                Text("BOOKMARKS")
+                    .font(.system(size: 9, weight: .semibold))
+                    .kerning(1.0)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 12)
+                    .padding(.top, 12)
+                    .padding(.bottom, 6)
+
+                if allEpubBookmarks.isEmpty {
+                    VStack(spacing: 8) {
+                        Spacer()
+                        Image(systemName: "bookmark")
+                            .font(.system(size: 28)).foregroundStyle(.quaternary)
+                        Text("No bookmarks yet")
+                            .font(.caption).foregroundStyle(.secondary)
+                        Spacer()
+                    }
+                    .frame(minHeight: 120)
+                } else {
+                    ScrollView {
+                        LazyVStack(spacing: 0) {
+                            ForEach(allEpubBookmarks, id: \.bookmark.id) { pair in
+                                let bm        = pair.bookmark
+                                let book      = pair.book
+                                let bookTitle = cleanTitle(book.url)
+
+                                Button {
+                                    selectedInitialHref    = bm.href
+                                    selectedInitialScrollY = bm.scrollY
+                                    selectedURL            = book.url
+                                    selectedFormat         = .epub
+                                } label: {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(bookTitle)
+                                            .font(.system(size: 9))
+                                            .foregroundStyle(.secondary)
+                                            .lineLimit(1)
+                                            .truncationMode(.tail)
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                        HStack(spacing: 8) {
+                                            Image(systemName: "bookmark.fill")
+                                                .font(.system(size: 10))
+                                                .foregroundStyle(filigreeAccent)
+                                            Text(bm.title)
+                                                .font(.system(size: 11, weight: .medium))
+                                                .lineLimit(1)
+                                                .truncationMode(.tail)
+                                                .foregroundStyle(.primary)
+                                            Spacer()
+                                            Image(systemName: "chevron.right")
+                                                .font(.system(size: 9)).foregroundStyle(.tertiary)
+                                        }
+                                    }
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 7)
+                                    .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                                .help("\(bookTitle) — \(bm.title)")
+                                Divider().padding(.leading, 32)
+                            }
+                        }
+                    }
+                }
+            }
+
+            Spacer()
+        }
+        .background(Color.platformWindowBg)
+        .onAppear { loadAllBookmarks() }
+    }
+
+    private func loadAllBookmarks() {
+        var pairs: [(book: BookFile, bookmark: EPUBBookmark)] = []
+        for book in bookFiles where book.format.isEPUB {
+            let key = "epubBookmarks_\(book.url.lastPathComponent)"
+            if let data = UserDefaults.standard.data(forKey: key),
+               let bms = try? JSONDecoder().decode([EPUBBookmark].self, from: data) {
+                for bm in bms { pairs.append((book: book, bookmark: bm)) }
+            }
+        }
+        allEpubBookmarks = pairs
+    }
+
+
 
     private func sectionHeader(_ title: String) -> some View {
         Text(title.uppercased())
@@ -575,9 +829,55 @@ struct EPUBLibraryView: View {
         panel.allowsMultipleSelection = false
         panel.prompt = "Select Books Folder"
         if panel.runModal() == .OK, let url = panel.url {
+            // Store both the plain path (display) and a security-scoped bookmark
             epubFolder = url.path
+            if let bookmark = try? url.bookmarkData(
+                options: .withSecurityScope,
+                includingResourceValuesForKeys: nil,
+                relativeTo: nil
+            ) {
+                epubFolderBookmarkData = bookmark
+            }
+            // Resolve immediately so scan() has a live security scope
+            resolveSecuredFolder()
             scan()
         }
+        #endif
+    }
+
+    /// Resolves the stored security-scoped bookmark and starts access.
+    /// Must be called before any file operations on the books folder.
+    private func resolveSecuredFolder() {
+        #if os(macOS)
+        // Stop any previously-held scope first
+        securedFolderURL?.stopAccessingSecurityScopedResource()
+        securedFolderURL = nil
+
+        guard !epubFolderBookmarkData.isEmpty else {
+            // Legacy: no bookmark yet — fall back to plain path (works if still accessible)
+            return
+        }
+        var isStale = false
+        guard let resolved = try? URL(
+            resolvingBookmarkData: epubFolderBookmarkData,
+            options: .withSecurityScope,
+            relativeTo: nil,
+            bookmarkDataIsStale: &isStale
+        ) else { return }
+
+        if isStale,
+           let fresh = try? resolved.bookmarkData(
+               options: .withSecurityScope,
+               includingResourceValuesForKeys: nil,
+               relativeTo: nil
+           ) {
+            epubFolderBookmarkData = fresh
+        }
+
+        guard resolved.startAccessingSecurityScopedResource() else { return }
+        securedFolderURL = resolved
+        // Keep the stored plain path in sync
+        epubFolder = resolved.path
         #endif
     }
 
@@ -593,6 +893,7 @@ struct EPUBLibraryView: View {
             epubURLs   = files.map { $0.url }
             isScanning = false
             coverStore.loadCovers(for: files.map { $0.url })
+            loadAllBookmarks()
         }
     }
 

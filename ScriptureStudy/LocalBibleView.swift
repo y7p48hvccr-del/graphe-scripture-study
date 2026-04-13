@@ -131,6 +131,7 @@ struct LocalBibleView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .background(theme.background)
+        .environment(\.colorScheme, themeID == "charcoal" ? .dark : .light)
     }
 
     // MARK: - Picker bar (above Bible text)

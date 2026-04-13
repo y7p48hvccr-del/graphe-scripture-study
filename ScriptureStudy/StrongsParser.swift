@@ -12,12 +12,18 @@ enum VerseSegment {
 struct StrongsParser {
 
     static func parse(_ input: String) -> [VerseSegment] {
-        if input.contains("<S>") {
-            return parsePostfixFormat(input)
-        } else if input.contains("<WG>") || input.contains("<WH>") || input.contains("<W>") {
-            return parsePrefixFormat(input)
+        // Strip <n>...</n> gloss notes before parsing — content shown via popover instead
+        var cleaned = input
+        while let o = cleaned.range(of: "<n>"),
+              let c = cleaned.range(of: "</n>", range: o.lowerBound..<cleaned.endIndex) {
+            cleaned.removeSubrange(o.lowerBound..<c.upperBound)
+        }
+        if cleaned.contains("<S>") {
+            return parsePostfixFormat(cleaned)
+        } else if cleaned.contains("<WG>") || cleaned.contains("<WH>") || cleaned.contains("<W>") {
+            return parsePrefixFormat(cleaned)
         } else {
-            return [.text(stripAllTags(input))]
+            return [.text(stripAllTags(cleaned))]
         }
     }
 

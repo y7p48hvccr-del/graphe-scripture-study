@@ -2,24 +2,40 @@
 <link rel="stylesheet" href="style.css"></head><body><article>
 <h1>Settings</h1>
 <p class="subtitle">All preferences in one place</p>
+
+<p>The Settings window is divided into three panels. The left panel shows a live technical dashboard with app and system metadata. The centre panel contains all preferences. The right panel has support links and the app trademark identity.</p>
+
 <h2 id="appearance">Appearance</h2>
 <ul>
 <li><strong>Theme</strong> — Light, Sepia, Blush, Light Grey or Charcoal</li>
-<li><strong>Accent colour</strong> — colour for verse numbers, icons and highlights</li>
-<li><strong>Font</strong> — reading font selection and size</li>
-<li><strong>Texture</strong> — optional paper grain overlay</li>
-<li><strong>Decoration</strong> — optional background decoration (currently disabled)</li>
+<li><strong>Reading text size</strong> — adjust with the slider; changes apply immediately</li>
+<li><strong>Font</strong> — choose from curated presets or type any installed Mac font</li>
+<li><strong>Paper texture</strong> — optional grain overlay with adjustable intensity</li>
+<li><strong>Filigree decoration</strong> — optional background accent with colour and intensity controls</li>
 </ul>
+
 <h2 id="behaviour">Behaviour</h2>
 <ul>
-<li><strong>Auto summaries</strong> — generate AI chapter summaries automatically</li>
-<li><strong>Launch animation</strong> — show the quill animation on startup</li>
-<li><strong>Flash Strong's</strong> — highlight matching Strong's words when tapping</li>
+<li><strong>Auto-generate chapter summaries</strong> — generate AI summaries automatically when loading a chapter</li>
+<li><strong>Show logo animation on launch</strong> — display the Graphē logo animation at startup</li>
+<li><strong>Show quick-start guide on launch</strong> — show the onboarding walkthrough at startup</li>
+<li><strong>Briefly highlight Strong's linked words on load</strong> — flash words linked to Strong's numbers when a chapter first loads</li>
 </ul>
-<h2 id="ai">AI</h2>
+
+<h2 id="ai">AI Engine — Claude</h2>
+<p>Enter your Anthropic API key to use Claude for AI-generated chapter summaries. When a key is set, Claude is used in preference to Ollama. Keys are stored securely on your Mac.</p>
+
+<h2 id="ollama">AI Engine — Ollama</h2>
+<p>Ollama runs AI models locally on your Mac with no API costs. Install Ollama, pull a model, and click <strong>Refresh</strong> to connect. The status indicator shows whether Ollama is running and lists available models.</p>
+
+<h2 id="advanced">Advanced — Book Reader</h2>
 <ul>
-<li><strong>Claude API key</strong> — your Anthropic API key for cloud AI</li>
-<li><strong>Ollama model</strong> — local AI model name</li>
-<li><strong>Ollama URL</strong> — server address (default http://localhost:11434)</li>
+<li><strong>Enrich book text with interactive links</strong> — detects Bible references and proper nouns in EPUB books and makes them tappable. May slow page loading on large books.</li>
+<li><strong>Pre-process books for faster re-reading</strong> — processes pages on first visit and caches results. Subsequent visits are faster but first visits take longer.</li>
 </ul>
+
+<h2 id="reset">Reset to Defaults</h2>
+<p>A <strong>Reset to Defaults</strong> button sits in the bottom of the left metadata panel. Clicking it restores all appearance and behaviour settings to their original values. Your API key, folder paths, and module selections are not affected.</p>
+
+<div class="tip">Defaults are: New York font at 17pt, Light theme, paper texture on, filigree on, auto-summaries off, launch animation on, onboarding on, Strong's flash off.</div>
 </article></body></html>

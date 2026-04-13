@@ -432,44 +432,64 @@ class EPUBParser {
 
     // MARK: - Parse EPUB
 
+    /// Convenience overload — opens its own archive from the URL.
+    /// Prefer parse(url:archive:) when you already have an open archive
+    /// to avoid opening the ZIP file a second time (which can fail under sandbox).
     static func parse(url: URL) -> EPUBBook? {
-        let archive: Archive
-        do { archive = try Archive(url: url, accessMode: .read, pathEncoding: nil) } catch { return nil }
+        guard let archive = try? Archive(url: url, accessMode: .read, pathEncoding: nil) else { return nil }
+        return parse(url: url, archive: archive)
+    }
+
+    /// Primary parse entry point — uses the supplied archive so no second open is needed.
+    static func parse(url: URL, archive: Archive) -> EPUBBook? {
+        print("DEBUG PARSE: start")
         var book = EPUBBook(url: url)
 
         // 1. container.xml -> OPF path
+        print("DEBUG PARSE: reading container.xml")
         guard let containerData = read("META-INF/container.xml", from: archive),
               let containerStr  = String(data: containerData, encoding: .utf8),
               let opfPath       = firstCapture(in: containerStr, pattern: "full-path=\"([^\"]+)\"")
-        else { return nil }
+        else { print("DEBUG PARSE: container.xml failed"); return nil }
 
+        print("DEBUG PARSE: opfPath = \(opfPath)")
         book.opfBase = (opfPath as NSString).deletingLastPathComponent
 
         // 2. OPF metadata
+        print("DEBUG PARSE: reading OPF")
         guard let opfData = read(opfPath, from: archive),
               let opfStr  = String(data: opfData, encoding: .utf8)
-        else { return nil }
+        else { print("DEBUG PARSE: OPF failed"); return nil }
 
+        print("DEBUG PARSE: parsing metadata")
         book.title  = tagContent("dc:title",   in: opfStr) ?? url.deletingPathExtension().lastPathComponent
         book.author = tagContent("dc:creator", in: opfStr) ?? ""
 
         // 3. Manifest id -> href map
+        print("DEBUG PARSE: building manifest")
         let manifest = buildManifest(opfStr, base: book.opfBase)
+        print("DEBUG PARSE: manifest has \(manifest.count) items")
 
         // 4. Cover image
+        print("DEBUG PARSE: finding cover")
         book.coverImage = findCover(opfStr: opfStr, manifest: manifest, archive: archive)
+        print("DEBUG PARSE: cover done")
 
         // 5. TOC - try NAV (epub3) then NCX (epub2)
+        print("DEBUG PARSE: building TOC")
         if let navHref = manifest.values.first(where: { $0.hasSuffix("nav.xhtml") || $0.contains("/nav.") }),
            let navData  = read(navHref, from: archive),
            let navStr   = String(data: navData, encoding: .utf8) {
+            print("DEBUG PARSE: using NAV toc")
             book.toc = parseNavTOC(navStr, base: book.opfBase)
         } else if let ncxHref = manifest.values.first(where: { $0.hasSuffix(".ncx") }),
                   let ncxData  = read(ncxHref, from: archive),
                   let ncxStr   = String(data: ncxData, encoding: .utf8) {
+            print("DEBUG PARSE: using NCX toc")
             book.toc = parseNCXTOC(ncxStr, base: book.opfBase)
         }
 
+        print("DEBUG PARSE: done, title=\(book.title) toc=\(book.toc.count)")
         return book
     }
 
@@ -613,6 +633,8 @@ class EPUBParser {
         return map
     }
 
+ 
+
     private static func findCover(opfStr: String, manifest: [String: String],
                                    archive: Archive) -> PlatformImage? {
         // Strategy 1: meta name="cover" -> manifest id
@@ -629,21 +651,7 @@ class EPUBParser {
            let data = read(href, from: archive),
            let img  = PlatformImage(data: data) { return img }
 
-        // Strategy 3: any manifest entry that is an image
-        if let href = manifest.values.first(where: {
-            imageExts.contains(($0 as NSString).pathExtension.lowercased())
-        }),
-           let data = read(href, from: archive),
-           let img  = PlatformImage(data: data) { return img }
-
-        // Strategy 4: first image file anywhere in archive
-        for entry in archive {
-            if imageExts.contains((entry.path as NSString).pathExtension.lowercased()) {
-                var data = Data()
-                _ = try? archive.extract(entry) { data.append($0) }
-                if let img = PlatformImage(data: data) { return img }
-            }
-        }
+        // Strategy 3 and 4 disabled — too many file reads can trigger issues
         return nil
     }
 

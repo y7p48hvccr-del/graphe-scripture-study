@@ -1,42 +1,54 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title>Library</title>
+<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title>Books Tab</title>
 <link rel="stylesheet" href="style.css"></head><body><article>
-<h1>Library</h1>
-<p class="subtitle">Managing your Bible modules</p>
+<h1>Books Tab</h1>
+<p class="subtitle">Your EPUB and PDF library</p>
 
-<h2 id="modules-folder">Modules folder</h2>
-<p>ScriptureStudy reads all MyBible-format SQLite files from a single folder. Click <strong>Choose Folder</strong> in the toolbar to set or change this folder. The folder path is shown at the bottom of the module list. Click <strong>Change</strong> to pick a different folder.</p>
+<h2>Overview</h2>
+<p>The Books tab is your personal reading library for EPUB and PDF books — theological works, commentaries, devotionals, classic Christian literature and anything else you want to read alongside your Bible study.</p>
 
-<h2>Refreshing</h2>
-<p>Click the <strong>↺ Refresh</strong> toolbar button to rescan the modules folder after adding or removing files.</p>
-
-<h2 id="search">Search</h2>
-<p>A search box at the top of the module list filters modules by name, language, author and other metadata stored in each module's info table. Common abbreviations are recognised — searching <strong>KJV</strong> finds "King James Version", <strong>LXX</strong> finds Septuagint modules, <strong>TSK</strong> finds Treasury of Scripture Knowledge, and so on.</p>
-
-<h2 id="favourites">Favourites</h2>
-<p>The Favourites section at the top of the list shows all currently visible modules across every category. Each entry shows the module name and a colour-coded type badge. Modules are added to Favourites automatically when their visibility is turned on, and removed when turned off.</p>
-
-<h2 id="categories">Categories</h2>
-<p>Modules are grouped into sections in alphabetical order:</p>
+<h2 id="layout">Layout</h2>
+<p>The Books tab has three sections:</p>
 <ul>
-<li><strong>Bibles</strong> — Bible translation modules</li>
-<li><strong>Commentaries</strong> — verse and chapter commentary</li>
-<li><strong>Cross-References</strong> — OBX, TSK and footnote cross-reference systems</li>
-<li><strong>Devotionals</strong> — daily devotional modules</li>
-<li><strong>Dictionaries</strong> — word definition dictionaries</li>
-<li><strong>Lexicons</strong> — Strong's Hebrew and Greek lexicons</li>
-<li><strong>Other</strong> — unrecognised module types</li>
-<li><strong>Reading Plans</strong> — day-by-day Bible reading schedules</li>
+<li><strong>Left panel</strong> — your Bible bookmarks, always visible for quick navigation</li>
+<li><strong>Main area</strong> — your book grid or list with search</li>
+<li><strong>Tabs at top</strong> — My Books, Magazines, Discover</li>
 </ul>
 
-<h2 id="visibility">Visibility toggle</h2>
-<p>Each module has an eye icon on the right. Click it to hide or show the module in the various pickers throughout the app. Hidden modules remain installed — they just don't appear in dropdowns. Use this to keep your pickers tidy when you have many modules installed.</p>
+<h2 id="folder">Choosing a books folder</h2>
+<p>Click <strong>Choose Folder</strong> in the toolbar to point the app to your EPUB and PDF files. This can be any folder on your Mac or in iCloud Drive. The app scans it automatically and displays all readable files.</p>
 
-<h2 id="hide-all">Hide All / Show All</h2>
-<p>Each section header has a <strong>Hide All</strong> / <strong>Show All</strong> button. This toggles the visibility of every module in that section at once.</p>
+<h2 id="search">Search</h2>
+<p>The compact search bar sits above the book grid. Two toggle pills to its left switch between search modes:</p>
+<ul>
+<li><strong>Title/Author</strong> — filters the grid by title or author name as you type</li>
+<li><strong>Inside Books</strong> — searches the full text content of all your EPUB files. Type your term and tap <strong>Go</strong>. Results show the book title, chapter, and a text snippet around each match. Tap a result to open that book at the matching location.</li>
+</ul>
 
-<h2 id="active-modules">Setting active modules</h2>
-<p>For Bibles, click <strong>Use</strong> to set a module as the active Bible. For dictionaries, lexicons and cross-reference modules, click <strong>Set as…</strong> to assign a module to its role. Only one module of each type can be active at a time.</p>
+<h2 id="views">View modes</h2>
+<p>Use the <strong>⋯</strong> menu in the toolbar to switch between Large Grid, Small Grid, and List view, and to sort by Title, Author, or Recently Opened.</p>
 
-<h2 id="import">Importing e-Sword modules</h2>
-<p>Click the <strong>Import e-Sword</strong> toolbar button to convert an e-Sword or MySword module file into MyBible format. The converted file is saved directly to your modules folder and scanned automatically.</p>
+<h2 id="bookmarks">Bookmarks panel</h2>
+<p>The left panel shows all your Bible bookmarks. Click the arrow next to any bookmark to navigate the Bible panel to that passage without leaving the Books tab.</p>
+
+<h2 id="adding">Adding books</h2>
+<p>There are three ways to add books:</p>
+<ul>
+<li>Copy EPUB or PDF files into your books folder in Finder, then click <strong>↺ Refresh</strong></li>
+<li>Click <strong>Import Files</strong> in the toolbar to copy files directly from anywhere on your Mac</li>
+<li>Use the <strong>Discover</strong> tab to browse and download free books from curated sources</li>
+</ul>
+
+<h2 id="redeeming">Redeeming a licence code</h2>
+<p>If you have purchased a Bible or book module with a licence code, click <strong>Redeem Code</strong> in the toolbar. Enter the code from your purchase confirmation email to download and unlock the module directly into your library.</p>
+
+<h2 id="deleting">Deleting books</h2>
+<p>In List view, click the trash icon next to the format badge under the book title. In Grid view, right-click a book cover and choose <strong>Delete</strong>. Deleted books are moved to the Trash.</p>
+
+<h2 id="magazines">Magazines</h2>
+<p>The Magazines tab shows PDF magazines downloaded from the Discover tab, organised by publication. Tap a publication to expand it and read individual issues.</p>
+
+<h2 id="discover">Discover</h2>
+<p>The Discover tab provides direct browser access to curated sources of free Christian books and resources — including Monergism, CCEL, Standard Ebooks, Inspired Walk, and more. Clicking a download link saves the file directly to your books folder.</p>
+
+<div class="tip">Books with multiple formats (e.g. both EPUB and MOBI) are automatically deduplicated — only the best readable version is shown.</div>
 </article></body></html>

@@ -97,6 +97,9 @@ struct CompanionPanel: View {
             Divider()
             contentArea
         }
+        .background(theme.background)
+        .foregroundStyle(theme.text)
+        .environment(\.colorScheme, themeID == "charcoal" ? .dark : .light)
         .onAppear {
             load()
             #if os(macOS)

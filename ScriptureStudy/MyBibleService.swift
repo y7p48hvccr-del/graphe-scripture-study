@@ -1,5 +1,97 @@
 import Foundation
 import SQLite3
+import CommonCrypto
+
+// MARK: - Graphē encryption key & decryption helper
+
+private let grapheKey: [UInt8] = [
+    0x9d, 0xd4, 0x49, 0x2d, 0x38, 0xe1, 0x65, 0xb6,
+    0xf6, 0x69, 0x9c, 0x3e, 0x31, 0x5f, 0x2f, 0x65,
+    0xf3, 0xff, 0x6c, 0xb4, 0x74, 0xea, 0x6f, 0xcb,
+    0x9b, 0x6e, 0x22, 0x22, 0xfc, 0xa4, 0x6b, 0xfe,
+]
+
+/// Decrypts a .graphe encrypted blob (IV + AES-256-CBC ciphertext) back to a UTF-8 string.
+/// Returns the original string unchanged if the data is not encrypted (plain .sqlite3 modules).
+func grapheDecrypt(_ blob: UnsafePointer<UInt8>?, _ blobLen: Int32, filePath: String) -> String? {
+    // Plain .sqlite3 — read as normal UTF-8 string
+    guard filePath.hasSuffix(".graphe") else {
+        guard let ptr = blob else { return nil }
+        return String(bytes: UnsafeBufferPointer(start: ptr, count: Int(blobLen)), encoding: .utf8)
+    }
+    guard let ptr = blob, blobLen > 16 else { return nil }
+    let ivData  = Data(bytes: ptr, count: 16)
+    let ctData  = Data(bytes: ptr + 16, count: Int(blobLen) - 16)
+    let keyData = Data(grapheKey)
+
+    let bufferSize = ctData.count + kCCBlockSizeAES128
+    var decrypted  = Data(count: bufferSize)
+    var numBytes   = 0
+
+    let status = decrypted.withUnsafeMutableBytes { decPtr in
+        ctData.withUnsafeBytes { ctPtr in
+            ivData.withUnsafeBytes { ivPtr in
+                keyData.withUnsafeBytes { keyPtr in
+                    CCCrypt(
+                        CCOperation(kCCDecrypt),
+                        CCAlgorithm(kCCAlgorithmAES),
+                        CCOptions(kCCOptionPKCS7Padding),
+                        keyPtr.baseAddress, kCCKeySizeAES256,
+                        ivPtr.baseAddress,
+                        ctPtr.baseAddress, ctData.count,
+                        decPtr.baseAddress, bufferSize,
+                        &numBytes
+                    )
+                }
+            }
+        }
+    }
+    guard status == kCCSuccess else { return nil }
+    return String(data: decrypted.prefix(numBytes), encoding: .utf8)
+}
+
+enum ModulesFolderBookmark {
+    private static let udKey = "modulesFolderBookmark"
+
+    static func save(_ url: URL) {
+        do {
+            let data = try url.bookmarkData(
+                options: .withSecurityScope,
+                includingResourceValuesForKeys: nil,
+                relativeTo: nil
+            )
+            UserDefaults.standard.set(data, forKey: udKey)
+        } catch {
+            // Bookmark creation failed; plain path already saved as sentinel
+        }
+    }
+
+    static func resolve() -> URL? {
+        guard let data = UserDefaults.standard.data(forKey: udKey) else { return nil }
+        var isStale = false
+        guard let url = try? URL(
+            resolvingBookmarkData: data,
+            options: .withSecurityScope,
+            relativeTo: nil,
+            bookmarkDataIsStale: &isStale
+        ) else { return nil }
+        if isStale {
+            if url.startAccessingSecurityScopedResource() {
+                save(url)
+                url.stopAccessingSecurityScopedResource()
+            }
+        }
+        return url
+    }
+
+    @discardableResult
+    static func withAccess<T>(_ body: (URL) throws -> T) rethrows -> T? {
+        guard let url = resolve() else { return nil }
+        guard url.startAccessingSecurityScopedResource() else { return nil }
+        defer { url.stopAccessingSecurityScopedResource() }
+        return try body(url)
+    }
+}
 
 // MARK: - Module Types
 
@@ -120,8 +212,26 @@ class MyBibleService: ObservableObject {
     @Published var modulesFolder:    String = "" {
         didSet {
             UserDefaults.standard.set(modulesFolder, forKey: "modulesFolder")
+            startFolderAccess()
             Task { await scanModules() }
         }
+    }
+
+    /// Holds the actively-accessed folder URL for the lifetime of the service.
+    /// All sqlite3_open_v2 calls on files inside this folder are covered while this is non-nil.
+    private var folderAccessURL: URL?
+
+    /// Resolve the security-scoped bookmark and begin access, replacing any previous token.
+    private func startFolderAccess() {
+        folderAccessURL?.stopAccessingSecurityScopedResource()
+        folderAccessURL = nil
+        guard let url = ModulesFolderBookmark.resolve() else { return }
+        guard url.startAccessingSecurityScopedResource() else { return }
+        folderAccessURL = url
+    }
+
+    deinit {
+        folderAccessURL?.stopAccessingSecurityScopedResource()
     }
 
     init() {
@@ -129,6 +239,8 @@ class MyBibleService: ObservableObject {
         if let paths = UserDefaults.standard.array(forKey: "hiddenModules") as? [String] {
             hiddenModules = Set(paths)
         }
+        // Start folder access immediately so module reads work from the first launch
+        startFolderAccess()
         if !modulesFolder.isEmpty {
             Task { await scanModules() }
         }
@@ -159,23 +271,32 @@ class MyBibleService: ObservableObject {
         guard !modulesFolder.isEmpty else { return }
         await MainActor.run { isLoading = true; errorMessage = nil }
 
-        let fm  = FileManager.default
-        let url = URL(fileURLWithPath: modulesFolder)
+        guard let folderURL = folderAccessURL else {
+            await MainActor.run {
+                errorMessage = "Modules folder is no longer accessible. Please re-select it."
+                isLoading = false
+            }
+            return
+        }
+
+        let fm = FileManager.default
 
         // Recursive scan — find SQLite files in subfolders too
         var sqliteFiles: [URL] = []
         if let enumerator = fm.enumerator(
-            at: url,
+            at: folderURL,
             includingPropertiesForKeys: [.isDirectoryKey],
             options: [.skipsHiddenFiles]
         ) {
             let allURLs = enumerator.compactMap { $0 as? URL }
             sqliteFiles = allURLs.filter {
-                ["sqlite3","sqlite","db"].contains($0.pathExtension.lowercased())
+                ["sqlite3","sqlite","db","graphe"].contains($0.pathExtension.lowercased())
             }
         } else {
-            errorMessage = "Could not read folder. Please select it again."
-            isLoading = false
+            await MainActor.run {
+                errorMessage = "Could not read folder. Please select it again."
+                isLoading = false
+            }
             return
         }
 
@@ -186,7 +307,17 @@ class MyBibleService: ObservableObject {
             }
         }
 
-        modules = found.sorted { $0.name < $1.name }
+        let typeOrder: [ModuleType] = [
+            .bible, .commentary, .crossRef, .crossRefNative,
+            .devotional, .dictionary, .encyclopedia, .strongs,
+            .readingPlan, .subheadings, .wordIndex, .unknown
+        ]
+        modules = found.sorted {
+            let ai = typeOrder.firstIndex(of: $0.type) ?? 99
+            let bi = typeOrder.firstIndex(of: $1.type) ?? 99
+            if ai != bi { return ai < bi }
+            return $0.name < $1.name
+        }
 
         // Restore saved selections, fall back to first available
         let bPath = selectedBiblePath
@@ -323,9 +454,8 @@ class MyBibleService: ObservableObject {
         sqlite3_bind_int(stmt, 2, Int32(chapter))
         var results: [MyBibleVerse] = []
         while sqlite3_step(stmt) == SQLITE_ROW {
-            guard let ptr = sqlite3_column_text(stmt, 3) else { continue }
-            let raw = String(cString: ptr)
-            guard !raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
+            guard let raw = self.col(stmt, 3, path: module.filePath),
+                  !raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
             results.append(MyBibleVerse(
                 book:    Int(sqlite3_column_int(stmt, 0)),
                 chapter: Int(sqlite3_column_int(stmt, 1)),
@@ -357,7 +487,7 @@ class MyBibleService: ObservableObject {
             var results: [MyBibleVerse] = []
             var rawTexts: [Int: String] = [:]
             while sqlite3_step(stmt) == SQLITE_ROW {
-                let raw  = sqlite3_column_text(stmt, 3).map { String(cString: $0) } ?? ""
+                let raw  = self.col(stmt, 3, path: module.filePath) ?? ""
                 // Skip empty verses (The Message and some other translations
                 // group multiple traditional verses into one row)
                 guard !raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
@@ -413,7 +543,7 @@ class MyBibleService: ObservableObject {
             sqlite3_bind_int(stmt, 2, Int32(chapter))
             var results: [CommentaryEntry] = []
             while sqlite3_step(stmt) == SQLITE_ROW {
-                let text = sqlite3_column_text(stmt, 5).map { String(cString: $0) } ?? ""
+                let text = self.col(stmt, 5, path: module.filePath) ?? ""
                 results.append(CommentaryEntry(
                     bookNumber:  Int(sqlite3_column_int(stmt, 0)),
                     chapterFrom: Int(sqlite3_column_int(stmt, 1)),
@@ -448,7 +578,7 @@ class MyBibleService: ObservableObject {
             var results: [DictionaryEntry] = []
             while sqlite3_step(stmt) == SQLITE_ROW {
                 let topic = sqlite3_column_text(stmt, 0).map { String(cString: $0) } ?? ""
-                let def   = sqlite3_column_text(stmt, 1).map { String(cString: $0) } ?? ""
+                let def   = self.col(stmt, 1, path: module.filePath) ?? ""
                 results.append(DictionaryEntry(topic: topic, definition: stripTags(def)))
             }
             sqlite3_finalize(stmt)
@@ -462,6 +592,18 @@ class MyBibleService: ObservableObject {
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
         return stmt
+    }
+
+    /// Reads a text/blob column from a statement, decrypting if the module is .graphe format.
+    nonisolated private func col(_ stmt: OpaquePointer?, _ col: Int32, path: String) -> String? {
+        guard let stmt = stmt else { return nil }
+        if path.hasSuffix(".graphe") {
+            let ptr = sqlite3_column_blob(stmt, col)?.assumingMemoryBound(to: UInt8.self)
+            let len = sqlite3_column_bytes(stmt, col)
+            return grapheDecrypt(ptr, len, filePath: path)
+        } else {
+            return sqlite3_column_text(stmt, col).map { String(cString: $0) }
+        }
     }
 
     /// Strip basic HTML tags from MyBible text
@@ -598,7 +740,7 @@ class MyBibleService: ObservableObject {
                     let tr = sqlite3_column_text(stmt, 2).map { String(cString: $0) } ?? ""
                     let pr = sqlite3_column_text(stmt, 3).map { String(cString: $0) } ?? ""
                     let sd = sqlite3_column_text(stmt, 4).map { String(cString: $0) } ?? ""
-                    let df = sqlite3_column_text(stmt, 5).map { String(cString: $0) } ?? ""
+                    let df = self.col(stmt, 5, path: module.filePath) ?? ""
                     sqlite3_finalize(stmt)
                     foundRow = (t, l, tr, pr, sd, df)
                     break
@@ -798,7 +940,7 @@ class MyBibleService: ObservableObject {
         sqlite3_bind_int(stmt, 2, Int32(chapter))
         var results = [MyBibleVerse]()
         while sqlite3_step(stmt) == SQLITE_ROW {
-            let raw = sqlite3_column_text(stmt, 3).map { String(cString: $0) } ?? ""
+            let raw = self.col(stmt, 3, path: module.filePath) ?? ""
             guard !raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
             results.append(MyBibleVerse(
                 book:    Int(sqlite3_column_int(stmt, 0)),
@@ -829,7 +971,7 @@ class MyBibleService: ObservableObject {
         sqlite3_bind_int(stmt, 2, Int32(chapter))
         var results = [CommentaryEntry]()
         while sqlite3_step(stmt) == SQLITE_ROW {
-            let raw       = sqlite3_column_text(stmt, 5).map { String(cString: $0) } ?? ""
+            let raw       = self.col(stmt, 5, path: module.filePath) ?? ""
             let verseFrom = Int(sqlite3_column_int(stmt, 2))
             var verseTo   = Int(sqlite3_column_int(stmt, 4))
             // verseTo == 0 means the commentary covers through the end of the chapter,
@@ -849,6 +991,11 @@ class MyBibleService: ObservableObject {
 
     private func stripStrongsAndTags(_ raw: String) -> String {
         var t = raw
+        // Strip <n>...</n> gloss notes AND their content (shown via popover instead)
+        while let o = t.range(of: "<n>"),
+              let c = t.range(of: "</n>", range: o.lowerBound..<t.endIndex) {
+            t.removeSubrange(o.lowerBound..<c.upperBound)
+        }
         // Strip <S>number</S> Strong's tags and their numeric content
         while let o = t.range(of: "<S>"),
               let c = t.range(of: "</S>", range: o.lowerBound..<t.endIndex) {
@@ -903,10 +1050,9 @@ class MyBibleService: ObservableObject {
                 if let stmt = query(db: db, sql: sql) {
                     sqlite3_bind_text(stmt, 1, (candidate as NSString).utf8String, -1, nil)
                     if sqlite3_step(stmt) == SQLITE_ROW,
-                       let topicPtr = sqlite3_column_text(stmt, 0),
-                       let defPtr   = sqlite3_column_text(stmt, 1) {
+                       let topicPtr = sqlite3_column_text(stmt, 0) {
                         let topic = String(cString: topicPtr)
-                        let raw   = String(cString: defPtr)
+                        let raw   = self.col(stmt, 1, path: module.filePath) ?? ""
                         sqlite3_finalize(stmt)
                         let clean = raw
                             .replacingOccurrences(of: "<p/>",  with: "\n\n")
@@ -978,10 +1124,9 @@ class MyBibleService: ObservableObject {
                 sqlite3_bind_int(stmt, 1, Int32(book))
                 sqlite3_bind_int(stmt, 2, Int32(chapter))
                 sqlite3_bind_int(stmt, 3, Int32(verse))
-                if sqlite3_step(stmt) == SQLITE_ROW,
-                   let raw = sqlite3_column_text(stmt, 0) {
-                    let html = String(cString: raw)
-                    groups = self.parseCrossRefHTML(html)
+                if sqlite3_step(stmt) == SQLITE_ROW {
+                    let html = self.col(stmt, 0, path: module.filePath) ?? ""
+                    if !html.isEmpty { groups = self.parseCrossRefHTML(html) }
                 }
                 sqlite3_finalize(stmt)
             }
@@ -1100,12 +1245,13 @@ class MyBibleService: ObservableObject {
             if let stmt = self.query(db: db, sql:
                 "SELECT devotion FROM devotions WHERE day=? LIMIT 1") {
                 sqlite3_bind_int(stmt, 1, Int32(day))
-                if sqlite3_step(stmt) == SQLITE_ROW,
-                   let raw = sqlite3_column_text(stmt, 0) {
-                    let html = String(cString: raw)
+                if sqlite3_step(stmt) == SQLITE_ROW {
+                    let html = self.col(stmt, 0, path: module.filePath) ?? ""
                     sqlite3_finalize(stmt)
-                    let title = Self.extractDevotionalTitle(html)
-                    return DevotionalEntry(day: day, title: title, html: html)
+                    if !html.isEmpty {
+                        let title = Self.extractDevotionalTitle(html)
+                        return DevotionalEntry(day: day, title: title, html: html)
+                    }
                 }
                 sqlite3_finalize(stmt)
             }

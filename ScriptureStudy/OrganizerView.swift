@@ -7,7 +7,6 @@ import SQLite3
 struct OrganizerView: View {
 
     @EnvironmentObject var notesManager:     NotesManager
-    @EnvironmentObject var bookmarksManager: BookmarksManager
     @EnvironmentObject var myBible:          MyBibleService
     @EnvironmentObject var calendarStore:    CalendarEventStore
 
@@ -27,7 +26,7 @@ struct OrganizerView: View {
     @State private var completedDays:   Set<Int> = []
     @State private var organizerSaveTimer: Timer? = nil
     @State private var organizerNote: Note? = nil
-    @StateObject private var editorController = NoteEditorController()
+    @StateObject private var editorController  = NoteEditorController()
 
     // Calendar colours
     let calRed    = Color(red: 0.90, green: 0.15, blue: 0.15)
@@ -43,27 +42,25 @@ struct OrganizerView: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            // ── LEFT: Calendar top 50%, bookmarks bottom 50% at 1/3 width
+            // ── LEFT: Calendar top ~60%, people portraits bottom ~40%
             VStack(spacing: 0) {
                 calendarSection
-                    .frame(maxHeight: .infinity)
-                Divider()
-                HStack(spacing: 0) {
-                    bookmarksPanel
-                        .frame(width: 160)
-                    Spacer()
-                }
-                .frame(maxHeight: .infinity)
+                Rectangle()
+                    .fill(Color(red: 0.75, green: 0.65, blue: 0.35).opacity(0.5))
+                    .frame(height: 1)
+                PeoplePanel()
+                    .frame(minHeight: 180)
             }
             .frame(width: 340)
+            .background(Color(red: 1.0, green: 0.96, blue: 0.80))
 
             Divider()
 
             // ── RIGHT: Day detail ───────────────────────────────────
             dayDetailSection
                 .frame(maxWidth: .infinity)
+                .background(Color(red: 1.0, green: 0.96, blue: 0.80))
         }
-        .background(Color(red: 1.0, green: 0.96, blue: 0.80))
         .onAppear {
             loadCompletedDays()
             loadDayDetail(for: selectedDate)
@@ -86,76 +83,6 @@ struct OrganizerView: View {
 
 
 
-    // MARK: - Bookmarks panel (bottom half of left panel)
-
-    private var bookmarksPanel: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                Image(systemName: "bookmark.fill")
-                    .font(.system(size: 10)).foregroundStyle(calRed)
-                Text("BOOKMARKS")
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(calRed)
-                Spacer()
-            }
-            .padding(.horizontal, 14).padding(.vertical, 10)
-            .background(Color(red: 1.0, green: 0.98, blue: 0.92))
-
-            Divider()
-
-            if bookmarksManager.bookmarks.isEmpty {
-                VStack {
-                    Spacer()
-                    Text("No bookmarks yet")
-                        .font(.system(size: 12))
-                        .foregroundStyle(Color(white: 0.6))
-                    Spacer()
-                }
-                .frame(maxWidth: .infinity)
-            } else {
-                ScrollView {
-                    VStack(spacing: 0) {
-                        ForEach(bookmarksManager.bookmarks) { bm in
-                            HStack {
-                                VStack(alignment: .leading, spacing: 1) {
-                                    Text(bm.displayTitle)
-                                        .font(.system(size: 12, weight: .semibold))
-                                        .foregroundStyle(.black)
-                                    Text(bm.formattedDate)
-                                        .font(.system(size: 10))
-                                        .foregroundStyle(Color(white: 0.6))
-                                }
-                                Spacer()
-                                Button {
-                                    NotificationCenter.default.post(
-                                        name: .navigateToPassage, object: nil,
-                                        userInfo: ["bookNumber": bm.bookNumber,
-                                                   "chapter":    bm.chapterNumber])
-                                } label: {
-                                    Image(systemName: "arrow.right.circle")
-                                        .font(.system(size: 13))
-                                        .foregroundStyle(calRed)
-                                }
-                                .buttonStyle(.plain)
-                                .help("Go to \(bm.displayTitle)")
-                            }
-                            .padding(.horizontal, 14).padding(.vertical, 6)
-                            .contextMenu {
-                                Button(role: .destructive) {
-                                    bookmarksManager.delete(bm)
-                                } label: {
-                                    Label("Delete Bookmark", systemImage: "trash")
-                                }
-                            }
-                            Divider().padding(.leading, 14)
-                        }
-                    }
-                }
-            }
-        }
-        .background(Color(red: 1.0, green: 0.97, blue: 0.88))
-    }
-
     // MARK: - Calendar section
 
     private var calendarSection: some View {
@@ -166,7 +93,7 @@ struct OrganizerView: View {
             Divider()
             calendarGrid
         }
-        .background(calBg)
+        .background(Color.clear)
     }
 
     private var calendarHeader: some View {
@@ -179,10 +106,19 @@ struct OrganizerView: View {
             }
             .buttonStyle(.plain)
 
-            Text(monthTitle)
-                .font(.system(size: 18, weight: .bold))
-                .foregroundStyle(.black)
-                .frame(maxWidth: .infinity)
+            // "I'm organised!" + month title
+            HStack(spacing: 8) {
+                Text("I'm organised!")
+                    .font(.system(size: 11, weight: .semibold))
+                    .italic()
+                    .foregroundStyle(calRed.opacity(0.7))
+                    .fixedSize()
+                Text(monthTitle)
+                    .font(.system(size: 18, weight: .bold))
+                    .foregroundStyle(.black)
+                    .fixedSize()
+            }
+            .frame(maxWidth: .infinity)
 
             Button { shiftMonth(1) } label: {
                 Image(systemName: "chevron.right")
@@ -209,7 +145,7 @@ struct OrganizerView: View {
             #endif
         }
         .padding(.vertical, 6)
-        .background(calBg)
+        .background(Color.clear)
     }
 
     private var weekdayRow: some View {
@@ -273,7 +209,7 @@ struct OrganizerView: View {
                 }
             }
         }
-        .background(calBg)
+        .background(Color.clear)
     }
 
     // MARK: - Day detail section
@@ -292,6 +228,11 @@ struct OrganizerView: View {
                             .font(.system(size: 13, weight: .medium))
                             .foregroundStyle(Color(white: 0.5))
                     }
+                    Spacer()
+                    Text("I'm organised!")
+                        .font(.custom("Chalkduster", size: 12))
+                        .foregroundStyle(calBlue.opacity(0.8))
+                        .fixedSize()
                     Spacer()
                     if isDayComplete(selectedDate) {
                         Label("Complete", systemImage: "checkmark.circle.fill")
@@ -374,7 +315,7 @@ struct OrganizerView: View {
           Divider()
           noteEditorSection
         }
-        .background(Color(red: 1.0, green: 0.96, blue: 0.80))
+        .background(Color.clear)
     }
 
 
@@ -427,7 +368,7 @@ struct OrganizerView: View {
                     isEditable:  true
                 )
                 .id(note.id)
-                .background(Color.white)
+                .background(calBg)
             } else {
                 VStack {
                     Spacer()
@@ -440,7 +381,7 @@ struct OrganizerView: View {
                     Spacer()
                 }
                 .frame(maxWidth: .infinity)
-                .background(Color.white)
+                .background(calBg)
             }
         }
     }
@@ -680,6 +621,254 @@ struct OrganizerView: View {
 
             return PlanEntry(bookNumber: bookNum, startChapter: startCh, displayText: display)
         }.value
+    }
+}
+
+// MARK: - Portrait Panel
+
+/// Stores portrait image data for 6 slots in UserDefaults
+final class PortraitStore: ObservableObject {
+    static let shared = PortraitStore()
+    private let key = "organizerPortraits"
+
+    @Published var images: [Int: NSImage] = [:]
+
+    init() { load() }
+
+    func set(_ image: NSImage, slot: Int) {
+        images[slot] = image
+        save()
+    }
+
+    func clear(slot: Int) {
+        images.removeValue(forKey: slot)
+        save()
+    }
+
+    private func save() {
+        var dict: [String: Data] = [:]
+        for (slot, img) in images {
+            if let tiff = img.tiffRepresentation,
+               let bmp  = NSBitmapImageRep(data: tiff),
+               let png  = bmp.representation(using: .jpeg, properties: [.compressionFactor: 0.85]) {
+                dict["\(slot)"] = png
+            }
+        }
+        if let data = try? JSONEncoder().encode(dict) {
+            UserDefaults.standard.set(data, forKey: key)
+        }
+    }
+
+    private func load() {
+        guard let data = UserDefaults.standard.data(forKey: key),
+              let dict = try? JSONDecoder().decode([String: Data].self, from: data)
+        else { return }
+        for (k, v) in dict {
+            if let slot = Int(k), let img = NSImage(data: v) {
+                images[slot] = img
+            }
+        }
+    }
+}
+
+struct PeoplePanel: View {
+    @StateObject private var store = PortraitStore.shared
+    private let slots = [0, 1, 2, 3, 4, 5]
+
+    var body: some View {
+        GeometryReader { geo in
+            let w = geo.size.width  / 2
+            let h = geo.size.height / 3
+            ZStack {
+                VStack(spacing: 0) {
+                    HStack(spacing: 0) {
+                        PortraitSlot(slot: 0, store: store, w: w, h: h)
+                        Rectangle().fill(Color.primary.opacity(0.15)).frame(width: 0.5)
+                        PortraitSlot(slot: 1, store: store, w: w, h: h)
+                    }
+                    Rectangle().fill(Color.primary.opacity(0.15)).frame(height: 0.5)
+                    HStack(spacing: 0) {
+                        PortraitSlot(slot: 2, store: store, w: w, h: h)
+                        Rectangle().fill(Color.primary.opacity(0.15)).frame(width: 0.5)
+                        PortraitSlot(slot: 3, store: store, w: w, h: h)
+                    }
+                    Rectangle().fill(Color.primary.opacity(0.15)).frame(height: 0.5)
+                    HStack(spacing: 0) {
+                        PortraitSlot(slot: 4, store: store, w: w, h: h)
+                        Rectangle().fill(Color.primary.opacity(0.15)).frame(width: 0.5)
+                        PortraitSlot(slot: 5, store: store, w: w, h: h)
+                    }
+                }
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(Color.primary.opacity(0.15), lineWidth: 0.5)
+                )
+            }
+        }
+        .background(Color(red: 1.0, green: 0.96, blue: 0.80))
+    }
+}
+
+struct PortraitSlot: View {
+    let slot:  Int
+    @ObservedObject var store: PortraitStore
+    let w: CGFloat
+    let h: CGFloat
+
+    @State private var isTargeted = false
+    @State private var showingPicker = false
+
+    var body: some View {
+        ZStack {
+            if let img = store.images[slot] {
+                // Filled — show photo
+                Image(nsImage: img)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+                    .frame(width: w, height: h)
+                    .clipped()
+                    .contextMenu {
+                        Button(role: .destructive) {
+                            store.clear(slot: slot)
+                        } label: {
+                            Label("Remove Photo", systemImage: "trash")
+                        }
+                    }
+                    .onDrag {
+                        // Allow dragging photo out (e.g. to Trash or Finder)
+                        let provider = NSItemProvider()
+                        if let tiff = img.tiffRepresentation,
+                           let bmp  = NSBitmapImageRep(data: tiff),
+                           let png  = bmp.representation(using: .png, properties: [:]) {
+                            provider.registerDataRepresentation(
+                                forTypeIdentifier: "public.png",
+                                visibility: .all) { completion in
+                                completion(png, nil)
+                                return nil
+                            }
+                        }
+                        return provider
+                    }
+            } else {
+                // Empty — placeholder
+                Rectangle()
+                    .fill(isTargeted
+                          ? Color.black.opacity(0.06)
+                          : Color(red: 1.0, green: 0.96, blue: 0.80))
+                    .frame(width: w, height: h)
+
+                VStack(spacing: 6) {
+                    FacePlaceholderIcon()
+                        .frame(width: 44, height: 44)
+                    Text("Drop here")
+                        .font(.system(size: 10))
+                        .foregroundStyle(Color(white: 0.5))
+                }
+            }
+        }
+        .frame(width: w, height: h)
+        .contentShape(Rectangle())
+        // Click to pick from file
+        .onTapGesture {
+            if store.images[slot] == nil { pickImage() }
+        }
+        // Drag & drop
+        .onDrop(of: [.fileURL, .image], isTargeted: $isTargeted) { providers in
+            handleDrop(providers)
+        }
+        .help(store.images[slot] == nil ? "Click or drag a photo here" : "")
+    }
+
+    private func pickImage() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.jpeg, .png, .heic, .tiff, .bmp]
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        if panel.runModal() == .OK, let url = panel.url,
+           let img = NSImage(contentsOf: url) {
+            store.set(img, slot: slot)
+        }
+    }
+
+    private func handleDrop(_ providers: [NSItemProvider]) -> Bool {
+        // Try file URL first
+        if let provider = providers.first(where: { $0.hasItemConformingToTypeIdentifier("public.file-url") }) {
+            provider.loadItem(forTypeIdentifier: "public.file-url", options: nil) { item, _ in
+                let url: URL?
+                if let data = item as? Data { url = URL(dataRepresentation: data, relativeTo: nil) }
+                else if let u = item as? URL { url = u }
+                else { url = nil }
+                if let url, let img = NSImage(contentsOf: url) {
+                    DispatchQueue.main.async { store.set(img, slot: slot) }
+                }
+            }
+            return true
+        }
+        // Try raw image
+        if let provider = providers.first(where: { $0.hasItemConformingToTypeIdentifier("public.image") }) {
+            provider.loadDataRepresentation(forTypeIdentifier: "public.image") { data, _ in
+                if let data, let img = NSImage(data: data) {
+                    DispatchQueue.main.async { store.set(img, slot: slot) }
+                }
+            }
+            return true
+        }
+        return false
+    }
+}
+
+// MARK: - Face Placeholder Icon
+
+struct FacePlaceholderIcon: View {
+    var body: some View {
+        Canvas { ctx, size in
+            let s = size.width
+            let cx = s / 2, cy = s / 2
+            let r = s * 0.46
+
+            // Head outline
+            var head = Path()
+            head.addEllipse(in: CGRect(x: cx - r, y: cy - r, width: r * 2, height: r * 2))
+            ctx.stroke(head, with: .color(Color(white: 0.72)), lineWidth: 1.0)
+
+            // Eyes
+            let eyeY = cy - r * 0.18
+            let eyeR: CGFloat = r * 0.10
+            let eyeOff = r * 0.28
+            for ex in [cx - eyeOff, cx + eyeOff] {
+                var eye = Path()
+                eye.addEllipse(in: CGRect(x: ex - eyeR, y: eyeY - eyeR, width: eyeR*2, height: eyeR*2))
+                ctx.stroke(eye, with: .color(Color(white: 0.72)), lineWidth: 1.0)
+            }
+
+            // Nose — small vertical line
+            var nose = Path()
+            nose.move(to: CGPoint(x: cx, y: cy + r * 0.05))
+            nose.addLine(to: CGPoint(x: cx, y: cy + r * 0.22))
+            ctx.stroke(nose, with: .color(Color(white: 0.72)), lineWidth: 1.0)
+
+            // Mouth — simple arc
+            var mouth = Path()
+            let mouthY = cy + r * 0.38
+            mouth.move(to: CGPoint(x: cx - r * 0.22, y: mouthY))
+            mouth.addQuadCurve(
+                to:      CGPoint(x: cx + r * 0.22, y: mouthY),
+                control: CGPoint(x: cx, y: mouthY + r * 0.14)
+            )
+            ctx.stroke(mouth, with: .color(Color(white: 0.72)), lineWidth: 1.0)
+
+            // Shoulders / neck suggestion
+            var neck = Path()
+            neck.move(to: CGPoint(x: cx, y: cy + r))
+            neck.addLine(to: CGPoint(x: cx, y: cy + r * 1.22))
+            neck.move(to: CGPoint(x: cx - r * 0.55, y: cy + r * 1.5))
+            neck.addQuadCurve(
+                to: CGPoint(x: cx + r * 0.55, y: cy + r * 1.5),
+                control: CGPoint(x: cx, y: cy + r * 1.28)
+            )
+            ctx.stroke(neck, with: .color(Color(white: 0.72)), lineWidth: 1.0)
+        }
     }
 }
 

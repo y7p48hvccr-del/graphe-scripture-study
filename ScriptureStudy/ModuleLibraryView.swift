@@ -6,15 +6,17 @@ struct ModuleLibraryView: View {
     @AppStorage("themeID")       private var themeID:       String = "light"
     var filigreeAccent: Color { resolvedFiligreeAccent(colorIndex: filigreeColor, themeID: themeID) }
     var filigreeAccentFill: Color { resolvedFiligreeAccentFill(colorIndex: filigreeColor, themeID: themeID) }
+    var theme: AppTheme { AppTheme.find(themeID) }
 
     @EnvironmentObject var myBible: MyBibleService
     @State private var showingESwordPicker = false
     @State private var showingImportPicker = false
     @State private var importStatus:   String? = nil
     @State private var importIsError:  Bool    = false
-    @State private var searchText:     String  = ""
-    @State private var moduleMetadata: [String: String] = [:]
-    @State private var selectedTab:    String  = "All"
+    @State private var searchText:       String  = ""
+    @State private var moduleMetadata:   [String: String] = [:]
+    @State private var selectedTab:      String  = "All"
+    @State private var selectedLanguage: String  = "all"
 
     // MARK: - Computed module lists
 
@@ -50,12 +52,16 @@ struct ModuleLibraryView: View {
     ]
 
     func filtered(_ modules: [MyBibleModule]) -> [MyBibleModule] {
+        // Language filter
+        let langFiltered = selectedLanguage == "all"
+            ? modules
+            : modules.filter { $0.language.lowercased() == selectedLanguage }
+        // Search filter
         let q = searchText.trimmingCharacters(in: .whitespaces).lowercased()
-        guard !q.isEmpty else { return modules }
-        // Expand abbreviations
+        guard !q.isEmpty else { return langFiltered }
         var terms = [q]
         if let expansions = searchAliases[q] { terms += expansions }
-        return modules.filter { m in
+        return langFiltered.filter { m in
             let name = m.name.lowercased()
             let lang = m.language.lowercased()
             let meta = (moduleMetadata[m.filePath] ?? "").lowercased()
@@ -65,113 +71,117 @@ struct ModuleLibraryView: View {
         }
     }
 
+    private var availableLanguages: [LanguageInfo] {
+        let codes = Set(myBible.modules.map { $0.language.lowercased() })
+        return codes
+            .map { LanguageInfo.from(code: $0) }
+            .sorted { $0.displayName < $1.displayName }
+    }
+
     // MARK: - Body
 
     var body: some View {
-        NavigationStack {
-            Group {
-                if myBible.modulesFolder.isEmpty {
-                    emptyState
-                } else if myBible.isLoading {
-                    VStack(spacing: 12) {
-                        Spacer()
-                        ProgressView("Scanning modules…")
-                        Spacer()
-                    }
-                } else if myBible.modules.isEmpty {
-                    VStack(spacing: 16) {
-                        Spacer()
-                        Image(systemName: "tray.fill")
-                            .font(.largeTitle).foregroundStyle(.quaternary)
-                        Text("No MyBible modules found in that folder.")
-                            .foregroundStyle(.secondary)
-                        Button("Choose Different Folder") { pickFolder() }
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 12).padding(.vertical, 6)
-                            .background(filigreeAccent)
-                            .clipShape(RoundedRectangle(cornerRadius: 8))
-                        Spacer()
-                    }
-                } else {
-                    moduleList
+        Group {
+            if myBible.modulesFolder.isEmpty {
+                emptyState
+            } else if myBible.isLoading {
+                VStack(spacing: 12) {
+                    Spacer()
+                    ProgressView("Scanning modules…")
+                    Spacer()
+                }
+            } else if myBible.modules.isEmpty {
+                VStack(spacing: 16) {
+                    Spacer()
+                    Image(systemName: "tray.fill")
+                        .font(.largeTitle).foregroundStyle(.quaternary)
+                    Text("No MyBible modules found in that folder.")
+                        .foregroundStyle(.secondary)
+                    Button("Choose Different Folder") { pickFolder() }
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 12).padding(.vertical, 6)
+                        .background(filigreeAccent)
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                    Spacer()
+                }
+            } else {
+                moduleList
+            }
+        }
+        .toolbar {
+            ToolbarItem(placement: .automatic) {
+                #if os(macOS)
+                HelpButton(page: "library")
+                #endif
+            }
+            ToolbarItem(placement: .primaryAction) {
+                Button { pickFolder() } label: {
+                    Label("Choose Folder", systemImage: "folder.badge.plus")
                 }
             }
-            .navigationTitle("Module Archives")
-            .toolbar {
-                ToolbarItem(placement: .automatic) {
-                    #if os(macOS)
-                    HelpButton(page: "library")
-                    #endif
+            ToolbarItem {
+                Button { showingImportPicker = true } label: {
+                    Label("Import Files", systemImage: "plus.circle")
                 }
-                ToolbarItem(placement: .primaryAction) {
-                    Button { pickFolder() } label: {
-                        Label("Choose Folder", systemImage: "folder.badge.plus")
-                    }
+                .help("Copy .graphe or .sqlite3 module files into your modules folder")
+                .disabled(myBible.modulesFolder.isEmpty)
+            }
+            ToolbarItem {
+                Button { showingESwordPicker = true } label: {
+                    Label("Import e-Sword", systemImage: "square.and.arrow.down")
                 }
-                ToolbarItem {
-                    Button { showingImportPicker = true } label: {
-                        Label("Import Files", systemImage: "plus.circle")
-                    }
-                    .help("Copy .sqlite3 module files into your modules folder")
-                    .disabled(myBible.modulesFolder.isEmpty)
-                }
-                ToolbarItem {
-                    Button { showingESwordPicker = true } label: {
-                        Label("Import e-Sword", systemImage: "square.and.arrow.down")
-                    }
-                    .help("Import e-Sword/MySword module")
-                    .disabled(myBible.modulesFolder.isEmpty)
-                }
-                ToolbarItem {
-                    Button { Task { await myBible.scanModules() } } label: {
-                        Label("Refresh", systemImage: "arrow.clockwise")
-                    }
+                .help("Import e-Sword/MySword module")
+                .disabled(myBible.modulesFolder.isEmpty)
+            }
+            ToolbarItem {
+                Button { Task { await myBible.scanModules() } } label: {
+                    Label("Refresh", systemImage: "arrow.clockwise")
                 }
             }
-            .overlay(alignment: .bottom) {
-                if let status = importStatus {
-                    HStack(spacing: 8) {
-                        Image(systemName: importIsError ? "xmark.circle.fill" : "checkmark.circle.fill")
-                            .foregroundStyle(importIsError ? .red : .green)
-                        Text(status).font(.caption.weight(.medium))
-                        Spacer()
-                        Button { importStatus = nil } label: {
-                            Image(systemName: "xmark").font(.system(size: 10))
-                        }.buttonStyle(.plain)
-                    }
-                    .padding(.horizontal, 14).padding(.vertical, 10)
-                    .background(.thinMaterial)
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
-                    .padding()
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
+        }
+        .overlay(alignment: .bottom) {
+            if let status = importStatus {
+                HStack(spacing: 8) {
+                    Image(systemName: importIsError ? "xmark.circle.fill" : "checkmark.circle.fill")
+                        .foregroundStyle(importIsError ? .red : .green)
+                    Text(status).font(.caption.weight(.medium))
+                    Spacer()
+                    Button { importStatus = nil } label: {
+                        Image(systemName: "xmark").font(.system(size: 10))
+                    }.buttonStyle(.plain)
                 }
+                .padding(.horizontal, 14).padding(.vertical, 10)
+                .background(.thinMaterial)
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+                .padding()
+                .transition(.move(edge: .bottom).combined(with: .opacity))
             }
-            .animation(.easeInOut, value: importStatus)
-            .fileImporter(
-                isPresented: $showingESwordPicker,
-                allowedContentTypes: [.item],
-                allowsMultipleSelection: false
-            ) { result in
-                switch result {
-                case .success(let urls):
-                    guard let url = urls.first else { return }
-                    importESword(url: url)
-                case .failure(let error):
-                    importStatus  = "Failed to open file: \(error.localizedDescription)"
-                    importIsError = true
-                }
+        }
+        .animation(.easeInOut, value: importStatus)
+        .fileImporter(
+            isPresented: $showingESwordPicker,
+            allowedContentTypes: [.item],
+            allowsMultipleSelection: false
+        ) { result in
+            switch result {
+            case .success(let urls):
+                guard let url = urls.first else { return }
+                importESword(url: url)
+            case .failure(let error):
+                importStatus  = "Failed to open file: \(error.localizedDescription)"
+                importIsError = true
             }
-            .fileImporter(
-                isPresented: $showingImportPicker,
-                allowedContentTypes: [.item],
-                allowsMultipleSelection: true
-            ) { result in
-                switch result {
-                case .success(let urls): importModuleFiles(urls)
-                case .failure(let error):
-                    importStatus  = "Failed: \(error.localizedDescription)"
-                    importIsError = true
-                }
+        }
+        .fileImporter(
+            isPresented: $showingImportPicker,
+            allowedContentTypes: [.item],
+            allowsMultipleSelection: true
+        ) { result in
+            switch result {
+            case .success(let urls): importModuleFiles(urls)
+            case .failure(let error):
+                importStatus  = "Failed: \(error.localizedDescription)"
+                importIsError = true
             }
         }
     }
@@ -185,7 +195,7 @@ struct ModuleLibraryView: View {
                 .font(.system(size: 56)).foregroundStyle(.quaternary)
             Text("No modules folder selected")
                 .font(.title2.weight(.semibold))
-            Text("Point the app to the folder containing\nyour MyBible .sqlite3 module files.")
+            Text("Point the app to the folder containing\nyour Graphē .graphe module files.")
                 .multilineTextAlignment(.center).foregroundStyle(.secondary)
             Button("Choose Modules Folder") { pickFolder() }
                 .foregroundStyle(.white)
@@ -200,7 +210,7 @@ struct ModuleLibraryView: View {
     // MARK: - Tab definitions (alphabetical)
 
     private struct ModuleTab {
-        let id: String; let label: String
+        let id: String; let label: String; var isEmpty: Bool = false
     }
 
     private var allTabs: [ModuleTab] {
@@ -216,8 +226,9 @@ struct ModuleLibraryView: View {
             ("Other",            others),
             ("Reading Plans",    readingPlans),
         ]
-        for (label, modules) in pairs where !modules.isEmpty {
-            tabs.append(ModuleTab(id: label, label: "\(label) (\(modules.count))"))
+        for (label, modules) in pairs {
+            let count = filtered(modules).count
+            tabs.append(ModuleTab(id: label, label: "\(label) (\(count))", isEmpty: count == 0))
         }
         return tabs
     }
@@ -240,59 +251,173 @@ struct ModuleLibraryView: View {
     // MARK: - Module list
 
     private var moduleList: some View {
+        HSplitView {
+            // Main list area
+            moduleMainArea
+                .frame(maxWidth: .infinity)
+                .background(theme.background)
+
+            // Right side panel
+            moduleSidePanel
+                .frame(minWidth: 200, maxWidth: 320)
+        }
+        .onAppear { loadMetadata() }
+        .onChange(of: myBible.modules) { _ in loadMetadata() }
+    }
+
+    // MARK: - Side panel
+
+    private var moduleSidePanel: some View {
         VStack(spacing: 0) {
-            // Search bar
-            HStack(spacing: 8) {
-                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                TextField("Search modules, authors, languages…", text: $searchText)
-                    .textFieldStyle(.plain)
-                if !searchText.isEmpty {
-                    Button { searchText = "" } label: {
-                        Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
-                    }.buttonStyle(.plain)
+
+            // Search box — matches Books style
+            VStack(spacing: 0) {
+                Text("SEARCH")
+                    .font(.system(size: 9, weight: .semibold))
+                    .kerning(1.0)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 12)
+                    .padding(.top, 12)
+                    .padding(.bottom, 6)
+
+                HStack(spacing: 6) {
+                    Image(systemName: "magnifyingglass")
+                        .foregroundStyle(.secondary).font(.system(size: 12))
+                    TextField("Search modules, languages…", text: $searchText)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 12))
+                    if !searchText.isEmpty {
+                        Button { searchText = "" } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundStyle(.secondary).font(.system(size: 12))
+                        }.buttonStyle(.plain)
+                    }
                 }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
+                .background(Color.secondary.opacity(0.07))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .padding(.horizontal, 10)
+                .padding(.bottom, 12)
             }
-            .padding(.horizontal, 12).padding(.vertical, 8)
             .background(Color.platformWindowBg)
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: 8)
+                .stroke(Color.primary.opacity(0.35), lineWidth: 0.75))
+            .padding(10)
 
             Divider()
 
+            VStack(spacing: 0) {
+                Text("LANGUAGE")
+                    .font(.system(size: 9, weight: .semibold))
+                    .kerning(1.0)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 12)
+                    .padding(.top, 12)
+                    .padding(.bottom, 8)
+
+                ScrollView(.vertical, showsIndicators: true) {
+                    VStack(spacing: 2) {
+                        // All languages row
+                        Button { selectedLanguage = "all" } label: {
+                            HStack(spacing: 8) {
+                                Text("🌐").font(.system(size: 16))
+                                Text("All Languages")
+                                    .font(.system(size: 12, weight: .medium))
+                                    .foregroundStyle(selectedLanguage == "all" ? .white : .primary)
+                                Spacer()
+                                Text("\(myBible.modules.count)")
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(selectedLanguage == "all" ? .white.opacity(0.8) : .secondary)
+                            }
+                            .padding(.horizontal, 10).padding(.vertical, 6)
+                            .background(selectedLanguage == "all" ? filigreeAccent : Color.clear)
+                            .clipShape(RoundedRectangle(cornerRadius: 6))
+                        }
+                        .buttonStyle(.plain)
+                        .padding(.horizontal, 6)
+
+                        ForEach(availableLanguages, id: \.code) { lang in
+                            let count = myBible.modules.filter {
+                                $0.language.lowercased() == lang.code
+                            }.count
+                            Button {
+                                selectedLanguage = selectedLanguage == lang.code ? "all" : lang.code
+                            } label: {
+                                HStack(spacing: 8) {
+                                    Text(lang.flag).font(.system(size: 16))
+                                    Text(lang.displayName)
+                                        .font(.system(size: 12, weight: .medium))
+                                        .foregroundStyle(selectedLanguage == lang.code ? .white : .primary)
+                                    Spacer()
+                                    Text("\(count)")
+                                        .font(.system(size: 11))
+                                        .foregroundStyle(selectedLanguage == lang.code
+                                                         ? .white.opacity(0.8) : .secondary)
+                                }
+                                .padding(.horizontal, 10).padding(.vertical, 6)
+                                .background(selectedLanguage == lang.code
+                                            ? filigreeAccent : Color.clear)
+                                .clipShape(RoundedRectangle(cornerRadius: 6))
+                            }
+                            .buttonStyle(.plain)
+                            .padding(.horizontal, 6)
+                        }
+                    }
+                    .padding(.bottom, 8)
+                }
+            }
+
+            Spacer(minLength: 0)
+        }
+    }
+
+    private var moduleMainArea: some View {
+        VStack(spacing: 0) {
             // Tab bar
             ZStack {
-                ScrollView(.horizontal, showsIndicators: false) {
+                ScrollView(.horizontal, showsIndicators: true) {
                     HStack(spacing: 6) {
                         ForEach(allTabs, id: \.id) { tab in
                             Button { selectedTab = tab.id } label: {
                                 Text(tab.label)
                                     .font(.system(size: 12, weight: .medium))
-                                    .padding(.horizontal, 10).padding(.vertical, 5)
+                                    .padding(.horizontal, 12).padding(.vertical, 7)
                                     .background(selectedTab == tab.id
                                                 ? filigreeAccent
-                                                : filigreeAccent.opacity(0.1))
-                                    .foregroundStyle(selectedTab == tab.id ? .white : filigreeAccent)
+                                                : filigreeAccent.opacity(tab.isEmpty ? 0.04 : 0.1))
+                                    .foregroundStyle(selectedTab == tab.id
+                                                     ? .white
+                                                     : tab.isEmpty
+                                                        ? filigreeAccent.opacity(0.3)
+                                                        : filigreeAccent)
                                     .clipShape(Capsule())
                             }
                             .buttonStyle(.plain)
+                            .disabled(tab.isEmpty && tab.id != "All")
                         }
                     }
-                    .padding(.horizontal, 12).padding(.vertical, 4)
+                    .padding(.horizontal, 12)
+                    .frame(maxHeight: .infinity)
                 }
                 HStack {
-                    LinearGradient(colors: [Color.platformWindowBg, .clear],
+                    LinearGradient(colors: [theme.background, .clear],
                                    startPoint: .leading, endPoint: .trailing)
                         .frame(width: 20)
                     Spacer()
-                }
-                .allowsHitTesting(false)
+                }.allowsHitTesting(false)
                 HStack {
                     Spacer()
-                    LinearGradient(colors: [.clear, Color.platformWindowBg],
+                    LinearGradient(colors: [.clear, theme.background],
                                    startPoint: .leading, endPoint: .trailing)
                         .frame(width: 20)
-                }
-                .allowsHitTesting(false)
+                }.allowsHitTesting(false)
             }
-            .frame(height: 36)
+            .frame(height: 48)
+            .background(theme.background)
 
             Divider()
 
@@ -300,15 +425,24 @@ struct ModuleLibraryView: View {
             if modules.isEmpty {
                 VStack {
                     Spacer()
-                    Text(searchText.isEmpty
+                    Text(searchText.isEmpty && selectedLanguage == "all"
                          ? "No modules in this category"
-                         : "No results for \u{201C}\(searchText)\u{201D}")
+                         : "No results")
                         .foregroundStyle(.secondary)
                     Spacer()
                 }
             } else {
                 List {
-                    ForEach(modules) { module in moduleRow(for: module) }
+                    ForEach(modules) { module in
+                        moduleRow(for: module)
+                            .contextMenu {
+                                Button {
+                                    showInFinder(module)
+                                } label: {
+                                    Label("Show in Finder", systemImage: "folder")
+                                }
+                            }
+                    }
                     if selectedTab == "All" {
                         Section {
                             HStack {
@@ -324,8 +458,6 @@ struct ModuleLibraryView: View {
                 }
             }
         }
-        .onAppear { loadMetadata() }
-        .onChange(of: myBible.modules) { _ in loadMetadata() }
     }
 
     @ViewBuilder
@@ -519,14 +651,25 @@ struct ModuleLibraryView: View {
     // MARK: - Folder picker
 
     private func importModuleFiles(_ urls: [URL]) {
-        let destFolder = URL(fileURLWithPath: myBible.modulesFolder)
+        guard let destFolder = ModulesFolderBookmark.resolve() else {
+            importStatus  = "Modules folder is no longer accessible. Please re-select it."
+            importIsError = true
+            return
+        }
+        guard destFolder.startAccessingSecurityScopedResource() else {
+            importStatus  = "Could not access modules folder. Please re-select it."
+            importIsError = true
+            return
+        }
+        defer { destFolder.stopAccessingSecurityScopedResource() }
+
         var copied = 0
         var skipped = 0
         for url in urls {
             guard url.startAccessingSecurityScopedResource() else { continue }
             defer { url.stopAccessingSecurityScopedResource() }
             let ext = url.pathExtension.lowercased()
-            guard ext == "sqlite3" || ext == "sqlite" || ext == "db" else {
+            guard ext == "graphe" || ext == "sqlite3" || ext == "sqlite" || ext == "db" else {
                 skipped += 1
                 continue
             }
@@ -548,9 +691,15 @@ struct ModuleLibraryView: View {
             importIsError = false
             Task { await myBible.scanModules() }
         } else {
-            importStatus  = skipped > 0 ? "No .sqlite3 files selected" : "Nothing imported"
+            importStatus  = skipped > 0 ? "No .graphe or .sqlite3 files selected" : "Nothing imported"
             importIsError = true
         }
+    }
+
+    private func showInFinder(_ module: MyBibleModule) {
+        #if os(macOS)
+        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: module.filePath)])
+        #endif
     }
 
     private func deleteModule(_ module: MyBibleModule) {
@@ -567,7 +716,10 @@ struct ModuleLibraryView: View {
         panel.allowsMultipleSelection = false
         panel.prompt = "Select Folder"
         if panel.runModal() == .OK, let url = panel.url {
-            myBible.modulesFolder = url.path
+            guard url.startAccessingSecurityScopedResource() else { return }
+            defer { url.stopAccessingSecurityScopedResource() }
+            ModulesFolderBookmark.save(url)
+            myBible.modulesFolder = url.path   // sentinel so empty-state check works
         }
         #endif
     }
