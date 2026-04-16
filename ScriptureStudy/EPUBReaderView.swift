@@ -77,7 +77,7 @@ struct EPUBReaderView: View {
                             Button { toggleBookmark() } label: {
                                 Image(systemName: isBookmarked ? "bookmark.fill" : "bookmark")
                                     .font(.system(size: 22))
-                                    .foregroundStyle(isBookmarked ? accent : Color.secondary.opacity(0.3))
+                                    .foregroundStyle(isBookmarked ? Color(red: 0.25, green: 0.45, blue: 0.75) : Color.secondary.opacity(0.3))
                                     .padding(12)
                             }
                             .buttonStyle(.plain)
@@ -168,11 +168,6 @@ struct EPUBReaderView: View {
                             Button { epubFontSize = min(32, epubFontSize + 1) } label: {
                                 Text("A").font(.system(size: 16, weight: .medium))
                             }.help("Increase text size")
-                            Divider().frame(height: 16)
-                            Button { toggleBookmark() } label: {
-                                Image(systemName: isBookmarked ? "bookmark.fill" : "bookmark")
-                                    .foregroundStyle(isBookmarked ? accent : .primary)
-                            }.help(isBookmarked ? "Remove bookmark" : "Bookmark this page")
                             Divider().frame(height: 16)
                             Button { withAnimation { showSearch.toggle(); if !showSearch { searchQuery = "" } } } label: {
                                 Image(systemName: "magnifyingglass")

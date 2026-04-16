@@ -181,10 +181,10 @@ struct PDFReaderView: View {
                         toggleBookmark()
                     } label: {
                         BookmarkRibbon()
-                            .fill(isBookmarked ? Color.red : Color.gray.opacity(0.12))
+                            .fill(isBookmarked ? Color(red: 0.25, green: 0.45, blue: 0.75) : Color.gray.opacity(0.12))
                             .overlay(
                                 BookmarkRibbon()
-                                    .stroke(isBookmarked ? Color.red.opacity(0.7) : Color.gray.opacity(0.25),
+                                    .stroke(isBookmarked ? Color(red: 0.25, green: 0.45, blue: 0.75).opacity(0.7) : Color.gray.opacity(0.25),
                                             lineWidth: 0.75)
                             )
                             .contentShape(BookmarkRibbon())

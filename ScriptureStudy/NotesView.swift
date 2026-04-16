@@ -268,7 +268,7 @@ struct NotesView: View {
                             }
                             .foregroundStyle(.white)
                             .padding(.horizontal, 10).padding(.vertical, 5)
-                            .background(filigreeAccent)
+                            .background(filigreeAccentFill)
                             .clipShape(Capsule())
                         }
                         .buttonStyle(.plain)

@@ -160,6 +160,15 @@ struct ScriptureReferenceParser {
     /// Scans the body text of an HTML string and wraps scripture references
     /// in <a href="scripture://bookNumber/chapter/verse"> links.
     static func injectLinks(into html: String, accentHex: String) -> String {
+        // Wrap everything in a safety net — never crash the EPUB reader
+        do {
+            return try injectLinksInternal(into: html, accentHex: accentHex)
+        } catch {
+            return html  // Return unmodified HTML on any error
+        }
+    }
+
+    private static func injectLinksInternal(into html: String, accentHex: String) throws -> String {
         // Only process text nodes — don't scan inside existing <a> tags or <style>/<script>
         // Strategy: split on tags, process text segments only
         let linkCSS = """
@@ -240,49 +249,55 @@ struct ScriptureReferenceParser {
                 with: linkCSS + "\n</style>", options: .backwards)
         }
 
-        // Split into segments: alternating text and tag
-        var segments: [(text: String, isTag: Bool)] = []
-        var current  = ""
-        var inTag    = false
+        // Stream through the HTML character by character, writing directly to output.
+        // Never materialise a segments array — process each text node inline and discard it.
+        var out          = ""
+        out.reserveCapacity(result.count + result.count / 4)
+        var textBuf      = ""
+        var inTag        = false
+        var insideAnchor = false
+        var tagBuf       = ""
+
+        // Max text node size to attempt scripture-ref injection.
+        // Nodes larger than this (e.g. inline scripts, huge paragraphs) are passed through unchanged.
+        let maxTextNode = 2_000
+
+        func flushText() {
+            guard !textBuf.isEmpty else { return }
+            if insideAnchor || textBuf.count > maxTextNode {
+                out.append(textBuf)
+            } else {
+                out.append(processTextSegment(textBuf))
+            }
+            textBuf = ""
+        }
 
         for ch in result {
             if ch == "<" {
                 if !inTag {
-                    if !current.isEmpty { segments.append((current, false)) }
-                    current = "<"
-                    inTag   = true
+                    flushText()
+                    tagBuf = "<"
+                    inTag  = true
                 } else {
-                    current.append(ch)
+                    tagBuf.append(ch)
                 }
             } else if ch == ">" && inTag {
-                current.append(ch)
-                segments.append((current, true))
-                current = ""
-                inTag   = false
-            } else {
-                current.append(ch)
-            }
-        }
-        if !current.isEmpty { segments.append((current, inTag)) }
-
-        // Track if we're inside an <a> tag — don't inject into nested links
-        var insideAnchor = false
-        var out          = ""
-
-        for seg in segments {
-            if seg.isTag {
-                let lower = seg.text.lowercased()
+                tagBuf.append(ch)
+                let lower = tagBuf.lowercased()
                 if lower.hasPrefix("<a ") || lower == "<a>" { insideAnchor = true }
-                if lower.hasPrefix("</a") { insideAnchor = false }
-                out.append(seg.text)
+                if lower.hasPrefix("</a")                   { insideAnchor = false }
+                out.append(tagBuf)
+                tagBuf = ""
+                inTag  = false
+            } else if inTag {
+                tagBuf.append(ch)
             } else {
-                if insideAnchor {
-                    out.append(seg.text)
-                } else {
-                    out.append(processTextSegment(seg.text))
-                }
+                textBuf.append(ch)
             }
         }
+        // Flush any remaining content
+        if !tagBuf.isEmpty { out.append(tagBuf) }
+        flushText()
 
         return out
     }
@@ -290,10 +305,6 @@ struct ScriptureReferenceParser {
     private static func processTextSegment(_ text: String) -> String {
         let pattern = #"(?<![A-Za-z\d])(?:(1|2|3)\s+)?([A-Z][a-z]{1,14})\.?\s+(\d{1,3})(?::\s*(\d{1,3})(?:[-\u2013\u2014](\d{1,3}))?)?"#
         guard let re = try? NSRegularExpression(pattern: pattern) else { return text }
-
-        // Semicolon-inherited reference: "; 85: 3" or "; 85:3"
-        let semiPattern = #";\s*(\d{1,3}):\s*(\d{1,3})"#
-        guard let semiRe = try? NSRegularExpression(pattern: semiPattern) else { return text }
 
         // Words that look like book names but aren't scripture references
         let blacklist: Set<String> = [
@@ -315,69 +326,40 @@ struct ScriptureReferenceParser {
 
         let ns      = text as NSString
         let range   = NSRange(location: 0, length: ns.length)
-        var result  = text
-        var offset  = 0
-
         let matches = re.matches(in: text, range: range)
-        for m in matches {
-            let fullRange = m.range
-            let matched   = ns.substring(with: fullRange)
 
-            let prefix   = m.range(at: 1).location != NSNotFound
-                           && m.range(at: 1).length > 0
-                           ? ns.substring(with: m.range(at: 1)) : ""
+        // Build replacements list, then apply in reverse so ranges stay valid
+        var replacements: [(range: Range<String.Index>, link: String)] = []
+
+        for m in matches {
             let bookStr  = m.range(at: 2).location != NSNotFound ? ns.substring(with: m.range(at: 2)) : ""
             let chapStr  = m.range(at: 3).location != NSNotFound ? ns.substring(with: m.range(at: 3)) : ""
-            let verseStr = m.range(at: 4).location != NSNotFound
-                           && m.range(at: 4).length > 0
+            let prefix   = m.range(at: 1).location != NSNotFound && m.range(at: 1).length > 0
+                           ? ns.substring(with: m.range(at: 1)) : ""
+            let verseStr = m.range(at: 4).location != NSNotFound && m.range(at: 4).length > 0
                            ? ns.substring(with: m.range(at: 4)) : ""
-            let verseEndStr = m.range(at: 5).location != NSNotFound
-                              && m.range(at: 5).length > 0
-                              ? ns.substring(with: m.range(at: 5)) : ""
 
             guard !blacklist.contains(bookStr.lowercased()) else { continue }
             guard bookStr.count >= 2 else { continue }
             if verseStr.isEmpty && bookStr.count < 3 { continue }
 
-            let lookupKey = prefix.isEmpty
-                ? bookStr.lowercased()
-                : "\(prefix) \(bookStr.lowercased())"
-
+            let lookupKey = prefix.isEmpty ? bookStr.lowercased() : "\(prefix) \(bookStr.lowercased())"
             guard let bookNum = bookNumbers[lookupKey],
                   let chapter = Int(chapStr) else { continue }
 
-            let verse = Int(verseStr)    ?? 0
-            let _     = Int(verseEndStr) ?? 0
-            let url   = "scripture://\(bookNum)/\(chapter)/\(verse)"
-            let link  = "<a href=\"\(url)\" class=\"scripture-ref\">\(matched)</a>"
+            let verse   = Int(verseStr) ?? 0
+            let matched = ns.substring(with: m.range)
+            let url     = "scripture://\(bookNum)/\(chapter)/\(verse)"
+            let link    = "<a href=\"\(url)\" class=\"scripture-ref\">\(matched)</a>"
 
-            let adjustedLoc = fullRange.location + offset
-            guard let swiftRange = Range(NSRange(location: adjustedLoc, length: fullRange.length),
-                                         in: result) else { continue }
-            result.replaceSubrange(swiftRange, with: link)
-            offset += link.count - fullRange.length
+            guard let swiftRange = Range(m.range, in: text) else { continue }
+            replacements.append((range: swiftRange, link: link))
+        }
 
-            // Immediately after linking this reference, check if a "; chapter: verse"
-            // follows it in the result string — if so, link that too using this book.
-            let searchStart = adjustedLoc + link.count
-            guard searchStart < result.utf16.count else { continue }
-            let searchRange = NSRange(location: searchStart, length: min(30, result.utf16.count - searchStart))
-            if let semiMatch = semiRe.firstMatch(in: result, range: searchRange),
-               let chapRange2  = Range(semiMatch.range(at: 1), in: result),
-               let verseRange2 = Range(semiMatch.range(at: 2), in: result),
-               let chapter2 = Int(result[chapRange2]),
-               let verse2   = Int(result[verseRange2]) {
-
-                let url2  = "scripture://\(bookNum)/\(chapter2)/\(verse2)"
-                guard let semiSwift = Range(semiMatch.range, in: result) else { continue }
-                let semiText = String(result[semiSwift])
-                // Keep the semicolon as plain text, link just the number part
-                let semiChar = semiText.prefix(while: { $0 == ";" || $0 == " " })
-                let refText  = semiText.dropFirst(semiChar.count)
-                let semiLink = "\(semiChar)<a href=\"\(url2)\" class=\"scripture-ref\">\(refText)</a>"
-                result.replaceSubrange(semiSwift, with: semiLink)
-                offset += semiLink.count - semiText.count
-            }
+        // Apply in reverse order so earlier ranges stay valid
+        var result = text
+        for rep in replacements.reversed() {
+            result.replaceSubrange(rep.range, with: rep.link)
         }
         return result
     }

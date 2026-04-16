@@ -1,5 +1,4 @@
 import SwiftUI
-import SQLite3
 
 struct ModuleLibraryView: View {
     @AppStorage("filigreeColor") private var filigreeColor: Int    = 0
@@ -14,13 +13,31 @@ struct ModuleLibraryView: View {
     @State private var importStatus:   String? = nil
     @State private var importIsError:  Bool    = false
     @State private var searchText:       String  = ""
+    @State private var searchMode:       String  = "modules"  // "modules" or "languages"
     @State private var moduleMetadata:   [String: String] = [:]
     @State private var selectedTab:      String  = "All"
-    @State private var selectedLanguage: String  = "all"
+    @AppStorage("defaultLanguage") private var selectedLanguage: String  = "all"
+    @AppStorage("defaultRegion")   private var selectedRegion:   String  = "Major Languages"
+    @AppStorage("pinnedLanguages") private var pinnedLanguagesRaw: String = ""
+
+    private var pinnedLanguages: [String] {
+        pinnedLanguagesRaw.isEmpty ? [] : pinnedLanguagesRaw.components(separatedBy: ",")
+    }
+
+    private func togglePin(_ code: String) {
+        var pins = pinnedLanguages
+        if pins.contains(code) {
+            pins.removeAll { $0 == code }
+        } else {
+            pins.append(code)
+        }
+        pinnedLanguagesRaw = pins.joined(separator: ",")
+    }
 
     // MARK: - Computed module lists
 
-    var bibles:       [MyBibleModule] { myBible.modules.filter { $0.type == .bible } }
+    var bibles:         [MyBibleModule] { myBible.modules.filter { $0.type == .bible } }
+    var strongsBibles:  [MyBibleModule] { myBible.modules.filter { $0.type == .bible && myBible.strongsFilePaths.contains($0.filePath) } }
     var commentaries: [MyBibleModule] { myBible.modules.filter { $0.type == .commentary } }
     var crossRefMods: [MyBibleModule] { myBible.modules.filter { $0.type == .crossRef || $0.type == .crossRefNative } }
     var devotionals:  [MyBibleModule] { myBible.modules.filter { $0.type == .devotional } }
@@ -28,6 +45,7 @@ struct ModuleLibraryView: View {
     var encyclopediaMods: [MyBibleModule] { myBible.modules.filter { $0.type == .encyclopedia } }
     var strongsMods:  [MyBibleModule] { myBible.modules.filter { $0.type == .strongs } }
     var readingPlans: [MyBibleModule] { myBible.modules.filter { $0.type == .readingPlan } }
+    var atlasMods:    [MyBibleModule] { myBible.modules.filter { $0.type == .atlas } }
     var others:       [MyBibleModule] { myBible.modules.filter { $0.type == .unknown || $0.type == .subheadings || $0.type == .wordIndex } }
     var favourites:   [MyBibleModule] { myBible.modules.filter { !myBible.hiddenModules.contains($0.filePath) } }
 
@@ -52,11 +70,19 @@ struct ModuleLibraryView: View {
     ]
 
     func filtered(_ modules: [MyBibleModule]) -> [MyBibleModule] {
+        // Region filter
+        let regionFiltered: [MyBibleModule]
+        if let region = LanguageInfo.regionMap.first(where: { $0.name == selectedRegion }) {
+            regionFiltered = modules.filter { region.codes.contains($0.language.lowercased()) }
+        } else {
+            regionFiltered = modules
+        }
         // Language filter
         let langFiltered = selectedLanguage == "all"
-            ? modules
-            : modules.filter { $0.language.lowercased() == selectedLanguage }
-        // Search filter
+            ? regionFiltered
+            : regionFiltered.filter { $0.language.lowercased() == selectedLanguage }
+        // Search filter — only applies in modules mode
+        guard searchMode == "modules" else { return langFiltered }
         let q = searchText.trimmingCharacters(in: .whitespaces).lowercased()
         guard !q.isEmpty else { return langFiltered }
         var terms = [q]
@@ -71,11 +97,64 @@ struct ModuleLibraryView: View {
         }
     }
 
+    @ViewBuilder
+    private func languageRow(lang: LanguageInfo, isPinned: Bool) -> some View {
+        let count = myBible.modules.filter { $0.language.lowercased() == lang.code }.count
+        let isSelected = selectedLanguage == lang.code
+        HStack(spacing: 8) {
+            Button {
+                selectedLanguage = isSelected ? "all" : lang.code
+                myBible.selectedLanguageFilter = isSelected ? "all" : lang.code
+            } label: {
+                HStack(spacing: 8) {
+                    Text(lang.flag).font(.system(size: 16))
+                    Text(lang.displayName)
+                        .font(.system(size: 12, weight: isSelected ? .semibold : .medium))
+                        .foregroundStyle(Color.primary)
+                    Spacer()
+                    Text("\(count)")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                    if isSelected {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(.horizontal, 10).padding(.vertical, 6)
+                .background(isSelected ? Color.primary.opacity(0.06) : Color.clear)
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 6)
+        .contextMenu {
+            Button {
+                togglePin(lang.code)
+            } label: {
+                Label(isPinned ? "Unpin" : "Pin to top",
+                      systemImage: isPinned ? "pin.slash" : "pin")
+            }
+        }
+    }
+
     private var availableLanguages: [LanguageInfo] {
         let codes = Set(myBible.modules.map { $0.language.lowercased() })
-        return codes
+        var all = codes
             .map { LanguageInfo.from(code: $0) }
             .sorted { $0.displayName < $1.displayName }
+        // Filter by region
+        if let region = LanguageInfo.regionMap.first(where: { $0.name == selectedRegion }) {
+            all = all.filter { region.codes.contains($0.code) }
+        }
+        // Filter by search text when in languages mode
+        if searchMode == "languages" && !searchText.trimmingCharacters(in: .whitespaces).isEmpty {
+            let q = searchText.lowercased()
+            return all.filter {
+                $0.displayName.lowercased().contains(q) || $0.code.lowercased().contains(q)
+            }
+        }
+        return all
     }
 
     // MARK: - Body
@@ -98,9 +177,9 @@ struct ModuleLibraryView: View {
                     Text("No MyBible modules found in that folder.")
                         .foregroundStyle(.secondary)
                     Button("Choose Different Folder") { pickFolder() }
-                        .foregroundStyle(.white)
+                        .foregroundStyle(Color.primary)
                         .padding(.horizontal, 12).padding(.vertical, 6)
-                        .background(filigreeAccent)
+                        .background(filigreeAccentFill)
                         .clipShape(RoundedRectangle(cornerRadius: 8))
                     Spacer()
                 }
@@ -198,9 +277,9 @@ struct ModuleLibraryView: View {
             Text("Point the app to the folder containing\nyour Graphē .graphe module files.")
                 .multilineTextAlignment(.center).foregroundStyle(.secondary)
             Button("Choose Modules Folder") { pickFolder() }
-                .foregroundStyle(.white)
+                .foregroundStyle(Color.primary)
                 .padding(.horizontal, 16).padding(.vertical, 8)
-                .background(filigreeAccent)
+                .background(filigreeAccentFill)
                 .clipShape(RoundedRectangle(cornerRadius: 8))
             Spacer()
         }
@@ -217,9 +296,11 @@ struct ModuleLibraryView: View {
         var tabs = [ModuleTab(id: "All", label: "All")]
         let pairs: [(String, [MyBibleModule])] = [
             ("Bibles",           bibles),
+            ("Strongs",          strongsBibles),
             ("Commentaries",     commentaries),
             ("Cross-References", crossRefMods),
             ("Devotionals",      devotionals),
+            ("Bible Maps",       atlasMods),
             ("Dictionaries",     dictMods),
             ("Encyclopedias",    encyclopediaMods),
             ("Lexicons",         strongsMods),
@@ -236,9 +317,11 @@ struct ModuleLibraryView: View {
     private func modulesForTab() -> [MyBibleModule] {
         switch selectedTab {
         case "Bibles":           return filtered(bibles)
+        case "Strongs":          return filtered(strongsBibles)
         case "Commentaries":     return filtered(commentaries)
         case "Cross-References": return filtered(crossRefMods)
         case "Devotionals":      return filtered(devotionals)
+        case "Bible Maps":        return filtered(atlasMods)
         case "Dictionaries":     return filtered(dictMods)
         case "Encyclopedias":    return filtered(encyclopediaMods)
         case "Lexicons":         return filtered(strongsMods)
@@ -261,8 +344,12 @@ struct ModuleLibraryView: View {
             moduleSidePanel
                 .frame(minWidth: 200, maxWidth: 320)
         }
-        .onAppear { loadMetadata() }
-        .onChange(of: myBible.modules) { _ in loadMetadata() }
+        .onAppear {
+            moduleMetadata = myBible.metadataBlobs
+            // Sync language selection from persisted filter
+            selectedLanguage = myBible.selectedLanguageFilter
+        }
+        .onChange(of: myBible.metadataBlobs) { newBlobs in moduleMetadata = newBlobs }
     }
 
     // MARK: - Side panel
@@ -284,7 +371,8 @@ struct ModuleLibraryView: View {
                 HStack(spacing: 6) {
                     Image(systemName: "magnifyingglass")
                         .foregroundStyle(.secondary).font(.system(size: 12))
-                    TextField("Search modules, languages…", text: $searchText)
+                    TextField(searchMode == "languages" ? "Search languages…" : "Search modules…",
+                              text: $searchText)
                         .textFieldStyle(.plain)
                         .font(.system(size: 12))
                     if !searchText.isEmpty {
@@ -299,6 +387,29 @@ struct ModuleLibraryView: View {
                 .background(Color.secondary.opacity(0.07))
                 .clipShape(RoundedRectangle(cornerRadius: 8))
                 .padding(.horizontal, 10)
+
+                // Mode toggle
+                HStack(spacing: 6) {
+                    ForEach([("modules", "Modules"), ("languages", "Languages")], id: \.0) { mode, label in
+                        Button {
+                            searchMode = mode
+                            searchText = ""
+                        } label: {
+                            Text(label)
+                                .font(.system(size: 10, weight: .medium))
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 5)
+                                .background(searchMode == mode
+                                    ? filigreeAccentFill
+                                    : Color.secondary.opacity(0.10))
+                                .foregroundStyle(searchMode == mode ? Color.primary : Color.secondary)
+                                .clipShape(RoundedRectangle(cornerRadius: 6))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 10)
+                .padding(.top, 6)
                 .padding(.bottom, 12)
             }
             .background(Color.platformWindowBg)
@@ -306,6 +417,34 @@ struct ModuleLibraryView: View {
             .overlay(RoundedRectangle(cornerRadius: 8)
                 .stroke(Color.primary.opacity(0.35), lineWidth: 0.75))
             .padding(10)
+
+            Divider()
+
+            // Region picker
+            VStack(spacing: 0) {
+                HStack {
+                    Text("REGION")
+                        .font(.system(size: 9, weight: .semibold))
+                        .kerning(1.0)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Picker("", selection: $selectedRegion) {
+                        ForEach(LanguageInfo.regionMap, id: \.name) { region in
+                            let count = myBible.modules.filter {
+                                region.codes.contains($0.language.lowercased())
+                            }.count
+                            if count > 0 {
+                                Text(region.name).tag(region.name)
+                            }
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .font(.system(size: 11))
+                    .onChange(of: selectedRegion) { _ in selectedLanguage = "all" }
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+            }
 
             Divider()
 
@@ -321,50 +460,26 @@ struct ModuleLibraryView: View {
 
                 ScrollView(.vertical, showsIndicators: true) {
                     VStack(spacing: 2) {
-                        // All languages row
-                        Button { selectedLanguage = "all" } label: {
-                            HStack(spacing: 8) {
-                                Text("🌐").font(.system(size: 16))
-                                Text("All Languages")
-                                    .font(.system(size: 12, weight: .medium))
-                                    .foregroundStyle(selectedLanguage == "all" ? .white : .primary)
-                                Spacer()
-                                Text("\(myBible.modules.count)")
-                                    .font(.system(size: 11))
-                                    .foregroundStyle(selectedLanguage == "all" ? .white.opacity(0.8) : .secondary)
-                            }
-                            .padding(.horizontal, 10).padding(.vertical, 6)
-                            .background(selectedLanguage == "all" ? filigreeAccent : Color.clear)
-                            .clipShape(RoundedRectangle(cornerRadius: 6))
-                        }
-                        .buttonStyle(.plain)
-                        .padding(.horizontal, 6)
+                        // Pinned languages
+                        let pinned = availableLanguages.filter { pinnedLanguages.contains($0.code) }
+                        let unpinned = availableLanguages.filter { !pinnedLanguages.contains($0.code) }
 
-                        ForEach(availableLanguages, id: \.code) { lang in
-                            let count = myBible.modules.filter {
-                                $0.language.lowercased() == lang.code
-                            }.count
-                            Button {
-                                selectedLanguage = selectedLanguage == lang.code ? "all" : lang.code
-                            } label: {
-                                HStack(spacing: 8) {
-                                    Text(lang.flag).font(.system(size: 16))
-                                    Text(lang.displayName)
-                                        .font(.system(size: 12, weight: .medium))
-                                        .foregroundStyle(selectedLanguage == lang.code ? .white : .primary)
-                                    Spacer()
-                                    Text("\(count)")
-                                        .font(.system(size: 11))
-                                        .foregroundStyle(selectedLanguage == lang.code
-                                                         ? .white.opacity(0.8) : .secondary)
-                                }
-                                .padding(.horizontal, 10).padding(.vertical, 6)
-                                .background(selectedLanguage == lang.code
-                                            ? filigreeAccent : Color.clear)
-                                .clipShape(RoundedRectangle(cornerRadius: 6))
+                        if !pinned.isEmpty {
+                            ForEach(pinned, id: \.code) { lang in
+                                languageRow(lang: lang, isPinned: true)
                             }
-                            .buttonStyle(.plain)
-                            .padding(.horizontal, 6)
+                            if !unpinned.isEmpty {
+                                Rectangle()
+                                    .fill(Color.primary.opacity(0.12))
+                                    .frame(height: 0.5)
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 4)
+                            }
+                        }
+
+                        // Unpinned languages
+                        ForEach(unpinned, id: \.code) { lang in
+                            languageRow(lang: lang, isPinned: false)
                         }
                     }
                     .padding(.bottom, 8)
@@ -377,46 +492,23 @@ struct ModuleLibraryView: View {
 
     private var moduleMainArea: some View {
         VStack(spacing: 0) {
-            // Tab bar
-            ZStack {
-                ScrollView(.horizontal, showsIndicators: true) {
-                    HStack(spacing: 6) {
-                        ForEach(allTabs, id: \.id) { tab in
-                            Button { selectedTab = tab.id } label: {
-                                Text(tab.label)
-                                    .font(.system(size: 12, weight: .medium))
-                                    .padding(.horizontal, 12).padding(.vertical, 7)
-                                    .background(selectedTab == tab.id
-                                                ? filigreeAccent
-                                                : filigreeAccent.opacity(tab.isEmpty ? 0.04 : 0.1))
-                                    .foregroundStyle(selectedTab == tab.id
-                                                     ? .white
-                                                     : tab.isEmpty
-                                                        ? filigreeAccent.opacity(0.3)
-                                                        : filigreeAccent)
-                                    .clipShape(Capsule())
-                            }
-                            .buttonStyle(.plain)
-                            .disabled(tab.isEmpty && tab.id != "All")
-                        }
+            // Category picker
+            HStack(spacing: 8) {
+                Text("CATEGORY")
+                    .font(.system(size: 9, weight: .semibold))
+                    .kerning(1.0)
+                    .foregroundStyle(.secondary)
+                Picker("", selection: $selectedTab) {
+                    ForEach(allTabs, id: \.id) { tab in
+                        Text(tab.label).tag(tab.id)
                     }
-                    .padding(.horizontal, 12)
-                    .frame(maxHeight: .infinity)
                 }
-                HStack {
-                    LinearGradient(colors: [theme.background, .clear],
-                                   startPoint: .leading, endPoint: .trailing)
-                        .frame(width: 20)
-                    Spacer()
-                }.allowsHitTesting(false)
-                HStack {
-                    Spacer()
-                    LinearGradient(colors: [.clear, theme.background],
-                                   startPoint: .leading, endPoint: .trailing)
-                        .frame(width: 20)
-                }.allowsHitTesting(false)
+                .pickerStyle(.menu)
+                .frame(maxWidth: 220)
+                Spacer()
             }
-            .frame(height: 48)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
             .background(theme.background)
 
             Divider()
@@ -527,6 +619,15 @@ struct ModuleLibraryView: View {
                 onToggleVisibility: { myBible.toggleHidden(module) },
                 onDelete: { deleteModule(module) }
             )
+        case .atlas:
+            ModuleRow(
+                module: module,
+                isSelected: false,
+                isHidden: myBible.hiddenModules.contains(module.filePath),
+                onSelect: {},
+                onToggleVisibility: { myBible.toggleHidden(module) },
+                onDelete: { deleteModule(module) }
+            )
         default:
             ModuleRow(
                 module: module,
@@ -572,33 +673,6 @@ struct ModuleLibraryView: View {
 
     // MARK: - Metadata search loader
 
-    private func loadMetadata() {
-        let modules = myBible.modules
-        let paths   = modules.map { $0.filePath }
-        Task.detached(priority: .background) {
-            var result: [String: String] = [:]
-            for (i, path) in paths.enumerated() {
-                var db: OpaquePointer?
-                guard sqlite3_open_v2(path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK
-                else { continue }
-                defer { sqlite3_close(db) }
-                var blob = ""
-                var stmt: OpaquePointer?
-                if sqlite3_prepare_v2(db, "SELECT value FROM info", -1, &stmt, nil) == SQLITE_OK {
-                    while sqlite3_step(stmt) == SQLITE_ROW {
-                        if let v = sqlite3_column_text(stmt, 0) {
-                            blob += " " + String(cString: v)
-                        }
-                    }
-                    sqlite3_finalize(stmt)
-                }
-                result[path] = blob
-                _ = i // suppress warning
-            }
-            let final = result
-            await MainActor.run { moduleMetadata = final }
-        }
-    }
 
     // MARK: - e-Sword import
 
@@ -747,6 +821,7 @@ struct FavouriteRow: View {
         case .readingPlan:             return "Plan"
         case .subheadings:             return "Subheadings"
         case .wordIndex:               return "Word Index"
+        case .atlas:                   return "Maps"
         case .unknown:                 return "Other"
         }
     }
@@ -763,6 +838,7 @@ struct FavouriteRow: View {
         case .readingPlan:             return Color(red: 0.3, green: 0.6, blue: 0.4)
         case .subheadings:             return .secondary
         case .wordIndex:               return .secondary
+        case .atlas:                   return .teal
         case .unknown:                 return .gray
         }
     }
@@ -835,6 +911,7 @@ struct ModuleRow: View {
         case .encyclopedia:   return "books.vertical.fill"
         case .subheadings:    return "list.bullet.indent"
         case .wordIndex:      return "magnifyingglass"
+        case .atlas:          return "map.fill"
         case .unknown:        return "doc.fill"
         }
     }
@@ -851,6 +928,7 @@ struct ModuleRow: View {
         case .encyclopedia:   return .orange
         case .subheadings:    return .secondary
         case .wordIndex:      return .secondary
+        case .atlas:          return .teal
         case .unknown:        return .gray
         }
     }

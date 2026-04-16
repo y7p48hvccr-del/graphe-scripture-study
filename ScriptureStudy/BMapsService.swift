@@ -122,22 +122,26 @@ class BMapsService: ObservableObject {
 
     private func findDB(in dir: URL) -> URL? {
         let fm = FileManager.default
-        // Direct match first
+        // Direct match first — dot and underscore variants
         let candidates = [
             dir.appendingPathComponent("BMaps.dictionary.SQLite3"),
             dir.appendingPathComponent("BMaps.dictionary.sqlite3"),
-            dir.appendingPathComponent("BMaps.dictionary.db")
+            dir.appendingPathComponent("BMaps.dictionary.db"),
+            dir.appendingPathComponent("BMaps_dictionary.SQLite3"),
+            dir.appendingPathComponent("BMaps_dictionary.sqlite3"),
+            dir.appendingPathComponent("BMaps_dictionary.db"),
+            dir.appendingPathComponent("BMaps.dictionary.graphe"),
+            dir.appendingPathComponent("BMaps_dictionary.graphe")
         ]
         if let hit = candidates.first(where: { fm.fileExists(atPath: $0.path) }) { return hit }
 
-        // Recursive search (handles subfolders)
+        // Recursive search — match any file starting with bmaps.dictionary or bmaps_dictionary
         guard let enumerator = fm.enumerator(at: dir,
                                               includingPropertiesForKeys: nil,
                                               options: [.skipsHiddenFiles]) else { return nil }
         for case let url as URL in enumerator {
             let name = url.lastPathComponent.lowercased()
-            if name.hasPrefix("bmaps.dictionary") &&
-               ["sqlite3","sqlite","db"].contains(url.pathExtension.lowercased()) {
+            if name.hasPrefix("bmaps.dictionary") || name.hasPrefix("bmaps_dictionary") {
                 return url
             }
         }
@@ -171,12 +175,23 @@ extension BMapsService {
         guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else { return nil }
         defer { sqlite3_close(db) }
 
+        // Detect whether this is an encrypted .graphe file
+        let isGraphe = dbPath.hasSuffix(".graphe")
+
         // Load CSS from info table
         var css = ""
         if let stmt = prepare(db, "SELECT value FROM info WHERE name='html_style'") {
-            if sqlite3_step(stmt) == SQLITE_ROW, let ptr = sqlite3_column_text(stmt, 0) {
-                css = String(cString: ptr)
-                    .replacingOccurrences(of: "%COLOR_TEXT%", with: "#333333")
+            if sqlite3_step(stmt) == SQLITE_ROW {
+                let raw: String?
+                if isGraphe {
+                    let ptr = sqlite3_column_blob(stmt, 0)?.assumingMemoryBound(to: UInt8.self)
+                    let len = sqlite3_column_bytes(stmt, 0)
+                    let decrypted = grapheDecrypt(ptr, len, filePath: dbPath)
+                    raw = (decrypted?.isEmpty == false) ? decrypted : sqlite3_column_text(stmt, 0).map { String(cString: $0) }
+                } else {
+                    raw = sqlite3_column_text(stmt, 0).map { String(cString: $0) }
+                }
+                css = (raw ?? "").replacingOccurrences(of: "%COLOR_TEXT%", with: "#333333")
             }
             sqlite3_finalize(stmt)
         }
@@ -185,8 +200,14 @@ extension BMapsService {
         var articleHTML = ""
         if let stmt = prepare(db, "SELECT definition FROM dictionary WHERE topic=?") {
             sqlite3_bind_text(stmt, 1, mapID, -1, SQLITE_TRANSIENT)
-            if sqlite3_step(stmt) == SQLITE_ROW, let ptr = sqlite3_column_text(stmt, 0) {
-                articleHTML = String(cString: ptr)
+            if sqlite3_step(stmt) == SQLITE_ROW {
+                if isGraphe {
+                    let ptr = sqlite3_column_blob(stmt, 0)?.assumingMemoryBound(to: UInt8.self)
+                    let len = sqlite3_column_bytes(stmt, 0)
+                    articleHTML = grapheDecrypt(ptr, len, filePath: dbPath) ?? ""
+                } else if let ptr = sqlite3_column_text(stmt, 0) {
+                    articleHTML = String(cString: ptr)
+                }
             }
             sqlite3_finalize(stmt)
         }
@@ -196,9 +217,23 @@ extension BMapsService {
         var fragments: [String: String] = [:]
         if let stmt = prepare(db, "SELECT id, fragment FROM content_fragments") {
             while sqlite3_step(stmt) == SQLITE_ROW {
-                guard let idPtr  = sqlite3_column_text(stmt, 0),
-                      let fragPtr = sqlite3_column_text(stmt, 1) else { continue }
-                fragments[String(cString: idPtr)] = String(cString: fragPtr)
+                guard let idPtr = sqlite3_column_text(stmt, 0) else { continue }
+                let key = String(cString: idPtr)
+                var fragStr = ""
+                if isGraphe {
+                    let ptr = sqlite3_column_blob(stmt, 1)?.assumingMemoryBound(to: UInt8.self)
+                    let len = sqlite3_column_bytes(stmt, 1)
+                    // Try decryption first; some columns in .graphe may be plain text
+                    if let decrypted = grapheDecrypt(ptr, len, filePath: dbPath), !decrypted.isEmpty {
+                        fragStr = decrypted
+                    } else if let textPtr = sqlite3_column_text(stmt, 1) {
+                        fragStr = String(cString: textPtr)
+                    }
+                } else if let fragPtr = sqlite3_column_text(stmt, 1) {
+                    fragStr = String(cString: fragPtr)
+                }
+                // Fix any missing base64 padding so browsers can decode the image
+                fragments[key] = BMapsService.fixBase64Padding(in: fragStr)
             }
             sqlite3_finalize(stmt)
         }
@@ -252,6 +287,27 @@ extension BMapsService {
     }
 
     private nonisolated static let SQLITE_TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+
+    /// Finds `base64,XXXXX"` substrings in a fragment string and ensures the
+    /// base64 payload is correctly padded to a multiple-of-4 length.
+    /// Strips embedded newlines from the base64 payload before padding.
+    private nonisolated static func fixBase64Padding(in fragment: String) -> String {
+        guard let markerRange = fragment.range(of: "base64,") else { return fragment }
+        // Everything before "base64," stays unchanged
+        let prefix = fragment[fragment.startIndex..<markerRange.upperBound]
+        let rest   = fragment[markerRange.upperBound...]
+        // base64 payload ends at the first closing " ' or >
+        let terminators = CharacterSet(charactersIn: "\"'>")
+        let endIdx = rest.unicodeScalars.firstIndex(where: { terminators.contains($0) }) ?? rest.endIndex
+        let b64Raw  = String(rest[rest.startIndex..<endIdx])
+        let suffix  = String(rest[endIdx...])
+        // Remove any embedded whitespace/newlines (some encoders wrap at 76 chars)
+        let b64Clean = b64Raw.components(separatedBy: .whitespacesAndNewlines).joined()
+        // Add missing padding
+        let rem    = b64Clean.count % 4
+        let padded = rem == 0 ? b64Clean : b64Clean + String(repeating: "=", count: 4 - rem)
+        return prefix + padded + suffix
+    }
 
     private nonisolated static func substituteIncludes(in html: String, fragments: [String: String]) -> String {
         // Replace <!-- INCLUDE(key) --> with fragment content

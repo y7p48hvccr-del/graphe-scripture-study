@@ -12,9 +12,9 @@ struct FiligreeColorPreset: Identifiable {
 let filigreePresets: [FiligreeColorPreset] = [
     FiligreeColorPreset(id: 0, name: "Pale Blue",     r: 80,  g: 130, b: 185),
     FiligreeColorPreset(id: 1, name: "Pale Sage",     r: 80,  g: 150, b: 90),
-    FiligreeColorPreset(id: 2, name: "Gold",     r: 210, g: 165, b: 80),
+    FiligreeColorPreset(id: 2, name: "Pale Gold",     r: 160, g: 125, b: 60),
     FiligreeColorPreset(id: 3, name: "Pale Lavender", r: 120, g: 95,  b: 170),
-    FiligreeColorPreset(id: 4, name: "Blush Pink",    r: 190, g: 100, b: 110),
+    FiligreeColorPreset(id: 4, name: "Blush Pink",    r: 220, g: 140, b: 150),
 ]
 
 // MARK: - Filigree Decoration View
@@ -303,32 +303,32 @@ struct FiligreeDecoration: View {
 extension FiligreeColorPreset {
     /// Saturated version for light backgrounds — darkened so it reads against white/cream
     var filigreeAccent: Color {
-        Color(red:   (r / 255) * 0.42,
-              green: (g / 255) * 0.40,
-              blue:  (b / 255) * 0.38)
+        Color(red:   (r / 255) * 0.78,
+              green: (g / 255) * 0.72,
+              blue:  (b / 255) * 0.70)
     }
 
     /// Luminous version for dark backgrounds — brightened so it glows against charcoal/black
     var filigreeAccentBright: Color {
-        Color(red:   min(0.75, (r / 255) * 1.10),
-              green: min(0.75, (g / 255) * 1.05),
-              blue:  min(0.75, (b / 255) * 1.00))
+        Color(red:   min(0.88, (r / 255) * 1.65),
+              green: min(0.88, (g / 255) * 1.60),
+              blue:  min(0.88, (b / 255) * 1.55))
     }
 
     /// Pastel version for solid fills — keeps the hue readable without going dark and muddy
     var filigreeAccentFill: Color {
         // Blend toward white so the colour stays recognisable at full opacity
-        let rr = (r / 255) * 0.35 + 0.58
-        let gg = (g / 255) * 0.35 + 0.58
-        let bb = (b / 255) * 0.35 + 0.58
+        let rr = (r / 255) * 0.55 + 0.42
+        let gg = (g / 255) * 0.55 + 0.42
+        let bb = (b / 255) * 0.55 + 0.42
         return Color(red: min(1, rr), green: min(1, gg), blue: min(1, bb))
     }
 
     /// Pastel fill for dark themes
     var filigreeAccentFillBright: Color {
-        let rr = min(0.85, (r / 255) * 0.60 + 0.10)
-        let gg = min(0.85, (g / 255) * 0.60 + 0.10)
-        let bb = min(0.85, (b / 255) * 0.60 + 0.10)
+        let rr = min(0.95, (r / 255) * 0.85 + 0.12)
+        let gg = min(0.95, (g / 255) * 0.85 + 0.12)
+        let bb = min(0.95, (b / 255) * 0.85 + 0.12)
         return Color(red: rr, green: gg, blue: bb)
     }
 }

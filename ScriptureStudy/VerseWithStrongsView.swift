@@ -58,6 +58,7 @@ struct VerseWithStrongsView: View {
 
     @EnvironmentObject var myBible:      MyBibleService
     @EnvironmentObject var notesManager: NotesManager
+    @EnvironmentObject var bmapsService: BMapsService
 
     @AppStorage("fontSize") private var fontSize: Double = 16
     @AppStorage("fontName") private var fontName:  String = ""
@@ -77,28 +78,6 @@ struct VerseWithStrongsView: View {
     @State private var selectedStrongs:  String?
     @State private var strongsEntry:     StrongsEntry?
     @State private var loadingStrongs    = false
-    @State private var showGlossPopover  = false
-
-    @AppStorage("showGlossNotes") private var showGlossNotes: Bool = true
-
-    /// Extracts <n>word: explanation</n> pairs from raw verse text
-    private var glossNotes: [(word: String, note: String)] {
-        var results: [(String, String)] = []
-        var text = rawText
-        while let open = text.range(of: "<n>"),
-              let close = text.range(of: "</n>", range: open.upperBound..<text.endIndex) {
-            let content = String(text[open.upperBound..<close.lowerBound])
-            if let colon = content.firstIndex(of: ":") {
-                let word = String(content[content.startIndex..<colon]).trimmingCharacters(in: .whitespaces)
-                let note = String(content[content.index(after: colon)...]).trimmingCharacters(in: .whitespaces)
-                results.append((word, note))
-            } else {
-                results.append(("", content.trimmingCharacters(in: .whitespaces)))
-            }
-            text = String(text[close.upperBound...])
-        }
-        return results
-    }
 
     private var tokens: [WordToken] {
         StrongsParser.parse(rawText).flatMap { seg -> [WordToken] in
@@ -144,15 +123,23 @@ struct VerseWithStrongsView: View {
                             .buttonStyle(.plain)
                             .contextMenu {
                                 Button("Copy '\(token.text)'") { copy(token.text) }
-                                Button("Look Up in Dictionary") { lookUp(token.text) }
                                 Divider()
                                 Button("Show Strong's (\(num))") { tappedStrongs(num, word: token.text) }
+                                if bmapsService.isLoaded && bmapsService.wordMatchesPlace(token.text) {
+                                    Button("Show '\(bmapsService.resolvedPlaceName(for: token.text))' on Map") {
+                                        showOnMap(token.text)
+                                    }
+                                }
                             }
                         } else {
                             Text(token.text).font(resolvedFont).foregroundStyle(theme.text)
                                 .contextMenu {
                                     Button("Copy '\(token.text)'") { copy(token.text) }
-                                    Button("Look Up in Dictionary") { lookUp(token.text) }
+                                    if bmapsService.isLoaded && bmapsService.wordMatchesPlace(token.text) {
+                                        Button("Show '\(bmapsService.resolvedPlaceName(for: token.text))' on Map") {
+                                            showOnMap(token.text)
+                                        }
+                                    }
                                 }
                         }
                     }
@@ -182,48 +169,6 @@ struct VerseWithStrongsView: View {
                 .buttonStyle(.plain)
                 .help("View note")
             }
-
-            // ── Gloss indicator ──
-            if showGlossNotes && !glossNotes.isEmpty {
-                Button { showGlossPopover.toggle() } label: {
-                    Text("n")
-                        .font(.system(size: 8, weight: .bold))
-                        .foregroundStyle(.black)
-                        .frame(width: 13, height: 13)
-                        .background(Color.white)
-                        .clipShape(Circle())
-                        .overlay(Circle().stroke(Color.black, lineWidth: 1))
-                }
-                .buttonStyle(.plain)
-                .help("Show translation notes")
-                .popover(isPresented: $showGlossPopover, arrowEdge: .trailing) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Translation Notes")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(.black)
-                        Divider()
-                        ForEach(glossNotes, id: \.word) { gloss in
-                            VStack(alignment: .leading, spacing: 2) {
-                                if !gloss.word.isEmpty {
-                                    Text(gloss.word)
-                                        .font(.system(size: 11, weight: .semibold))
-                                        .foregroundStyle(.black)
-                                }
-                                Text(gloss.note)
-                                    .font(.system(size: 11))
-                                    .foregroundStyle(.black)
-                            }
-                        }
-                    }
-                    .padding(12)
-                    .background(Color.white)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 6)
-                            .stroke(Color.black, lineWidth: 1)
-                    )
-                    .frame(minWidth: 160, maxWidth: 260)
-                }
-            }
         }
         .padding(.horizontal, 6).padding(.vertical, 3)
         .background(isSelected ? filigreeAccentFill.opacity(0.20) : Color.clear)
@@ -250,15 +195,13 @@ struct VerseWithStrongsView: View {
         #endif
     }
 
-    private func lookUp(_ word: String) {
-        let clean = word.trimmingCharacters(in: .punctuationCharacters)
-        if let url = URL(string: "dict://\(clean.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? clean)") {
-            #if os(macOS)
-            NSWorkspace.shared.open(url)
-            #else
-            UIApplication.shared.open(url)
-            #endif
-        }
+    private func showOnMap(_ word: String) {
+        let placeName = bmapsService.resolvedPlaceName(for: word)
+        NotificationCenter.default.post(
+            name: Notification.Name("showPlaceOnMap"),
+            object: nil,
+            userInfo: ["placeName": placeName]
+        )
     }
 }
 
@@ -308,7 +251,7 @@ struct NotePreviewPopup: View {
                             .font(.caption.weight(.medium))
                             .foregroundStyle(.white)
                             .padding(.horizontal, 12).padding(.vertical, 5)
-                            .background(filigreeAccent)
+                            .background(filigreeAccentFill)
                             .clipShape(RoundedRectangle(cornerRadius: 6))
                     }
                     .buttonStyle(.plain)

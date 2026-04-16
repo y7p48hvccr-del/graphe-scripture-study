@@ -107,6 +107,7 @@ enum ModuleType: String, CaseIterable {
     case encyclopedia   = "Encyclopedia"
     case subheadings    = "Subheadings"
     case wordIndex      = "Word Index"
+    case atlas          = "Bible Maps"
     case unknown        = "Other"
 }
 
@@ -187,6 +188,11 @@ let myBibleBookOrder: [Int] = myBibleBookNumbers.keys.sorted()
 class MyBibleService: ObservableObject {
 
     @Published var modules:          [MyBibleModule] = []
+    @Published var selectedLanguageFilter: String = UserDefaults.standard.string(forKey: "defaultLanguage") ?? "all" {
+        didSet { UserDefaults.standard.set(selectedLanguageFilter, forKey: "defaultLanguage") }
+    }
+    @Published var metadataBlobs:    [String: String] = [:]  // filePath -> info blob for search
+    @Published var strongsFilePaths: Set<String> = []        // filePaths of Bibles with Strong's numbers
     @Published var hiddenModules:     Set<String>     = []   // file paths of hidden modules
     @Published var selectedBible:      MyBibleModule? { didSet { selectedBiblePath      = selectedBible?.filePath      ?? "" } }
     @Published var selectedStrongs:    MyBibleModule? { didSet { selectedStrongsPath    = selectedStrongs?.filePath    ?? "" } }
@@ -265,6 +271,81 @@ class MyBibleService: ObservableObject {
         modules.filter { !hiddenModules.contains($0.filePath) }
     }
 
+    // MARK: - Module metadata cache
+
+    /// Lightweight cache entry — stored as JSON in Application Support
+    private struct ModuleCache: Codable {
+        var entries: [String: CacheEntry]   // keyed by filePath
+        struct CacheEntry: Codable {
+            let name:        String
+            let language:    String
+            let type:        String
+            let modDate:     Double          // file modification date as timeIntervalSince1970
+            var metaBlob:    String          // concatenated info values for search
+            var hasStrongs:  Bool            // strong_numbers or is_strong flag
+        }
+    }
+
+    private var cacheURL: URL? {
+        guard let appSupport = FileManager.default.urls(
+            for: .applicationSupportDirectory, in: .userDomainMask).first
+        else { return nil }
+        let dir = appSupport.appendingPathComponent("Graphe", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir.appendingPathComponent("module_cache.json")
+    }
+
+    private func loadCache() -> ModuleCache {
+        guard let url = cacheURL,
+              let data = try? Data(contentsOf: url),
+              let cache = try? JSONDecoder().decode(ModuleCache.self, from: data)
+        else { return ModuleCache(entries: [:]) }
+        return cache
+    }
+
+    private func saveCache(_ cache: ModuleCache) {
+        guard let url = cacheURL,
+              let data = try? JSONEncoder().encode(cache)
+        else { return }
+        try? data.write(to: url, options: .atomic)
+    }
+
+    private func moduleTypeFromString(_ s: String) -> ModuleType {
+        switch s {
+        case "bible":         return .bible
+        case "commentary":    return .commentary
+        case "crossRef":      return .crossRef
+        case "crossRefNative":return .crossRefNative
+        case "devotional":    return .devotional
+        case "dictionary":    return .dictionary
+        case "encyclopedia":  return .encyclopedia
+        case "strongs":       return .strongs
+        case "readingPlan":   return .readingPlan
+        case "subheadings":   return .subheadings
+        case "wordIndex":     return .wordIndex
+        case "atlas":         return .atlas
+        default:              return .unknown
+        }
+    }
+
+    private func moduleTypeToString(_ t: ModuleType) -> String {
+        switch t {
+        case .bible:          return "bible"
+        case .commentary:     return "commentary"
+        case .crossRef:       return "crossRef"
+        case .crossRefNative: return "crossRefNative"
+        case .devotional:     return "devotional"
+        case .dictionary:     return "dictionary"
+        case .encyclopedia:   return "encyclopedia"
+        case .strongs:        return "strongs"
+        case .readingPlan:    return "readingPlan"
+        case .subheadings:    return "subheadings"
+        case .wordIndex:      return "wordIndex"
+        case .atlas:          return "atlas"
+        default:              return "unknown"
+        }
+    }
+
     // MARK: - Scan folder for modules
 
     func scanModules() async {
@@ -281,15 +362,16 @@ class MyBibleService: ObservableObject {
 
         let fm = FileManager.default
 
-        // Recursive scan — find SQLite files in subfolders too
-        var sqliteFiles: [URL] = []
+        // Recursive scan — find module files in subfolders too
+        // Request modification date key so we can compare with cache
+        var moduleFiles: [URL] = []
         if let enumerator = fm.enumerator(
             at: folderURL,
-            includingPropertiesForKeys: [.isDirectoryKey],
+            includingPropertiesForKeys: [.isDirectoryKey, .contentModificationDateKey],
             options: [.skipsHiddenFiles]
         ) {
             let allURLs = enumerator.compactMap { $0 as? URL }
-            sqliteFiles = allURLs.filter {
+            moduleFiles = allURLs.filter {
                 ["sqlite3","sqlite","db","graphe"].contains($0.pathExtension.lowercased())
             }
         } else {
@@ -300,15 +382,65 @@ class MyBibleService: ObservableObject {
             return
         }
 
+        // Load existing cache
+        var cache = loadCache()
         var found: [MyBibleModule] = []
-        for file in sqliteFiles {
-            if let module = await inspectModule(at: file.path) {
+        var cacheUpdated = false
+        var cachedBlobs: [String: String] = [:]
+        var cachedStrongs: Set<String> = []
+
+        // Remove stale entries (files no longer present)
+        let currentPaths = Set(moduleFiles.map { $0.path })
+        let stalePaths = cache.entries.keys.filter { !currentPaths.contains($0) }
+        for p in stalePaths { cache.entries.removeValue(forKey: p); cacheUpdated = true }
+
+        for file in moduleFiles {
+            let path = file.path
+            let modDate = (try? file.resourceValues(forKeys: [.contentModificationDateKey]))
+                .flatMap { $0.contentModificationDate }?.timeIntervalSince1970 ?? 0
+
+            // Use cache if file hasn't changed
+            if let entry = cache.entries[path], entry.modDate == modDate {
+                found.append(MyBibleModule(
+                    name:        entry.name,
+                    description: entry.name,
+                    language:    entry.language,
+                    type:        moduleTypeFromString(entry.type),
+                    filePath:    path
+                ))
+                cachedBlobs[path] = entry.metaBlob
+                if entry.hasStrongs && moduleTypeFromString(entry.type) == .bible {
+                    cachedStrongs.insert(path)
+                }
+                continue
+            }
+
+            // File is new or modified — inspect it
+            if let (module, blob, strongsFlag) = await inspectModuleWithBlob(at: path) {
                 found.append(module)
+                cachedBlobs[path] = blob
+                if strongsFlag && module.type == .bible { cachedStrongs.insert(path) }
+                cache.entries[path] = ModuleCache.CacheEntry(
+                    name:       module.name,
+                    language:   module.language,
+                    type:       moduleTypeToString(module.type),
+                    modDate:    modDate,
+                    metaBlob:   blob,
+                    hasStrongs: strongsFlag
+                )
+                cacheUpdated = true
             }
         }
 
+        // Save updated cache
+        if cacheUpdated { saveCache(cache) }
+
+        // Publish metadata blobs and Strong's flags
+        metadataBlobs    = cachedBlobs
+        strongsFilePaths = cachedStrongs
+
         let typeOrder: [ModuleType] = [
-            .bible, .commentary, .crossRef, .crossRefNative,
+            .bible, .commentary, .crossRef, .crossRefNative, .atlas,
             .devotional, .dictionary, .encyclopedia, .strongs,
             .readingPlan, .subheadings, .wordIndex, .unknown
         ]
@@ -334,15 +466,12 @@ class MyBibleService: ObservableObject {
         } else if selectedStrongs == nil {
             selectedStrongs = modules.first(where: { $0.type == .strongs })
         }
-        // Auto-select devotional
         if selectedDevotional == nil {
             selectedDevotional = modules.first(where: { $0.type == .devotional })
         }
-        // Auto-select encyclopedia
         if selectedEncyclopedia == nil {
             selectedEncyclopedia = modules.first(where: { $0.type == .encyclopedia })
         }
-        // Auto-select cross-reference module (prefer native format)
         if selectedCrossRef == nil {
             selectedCrossRef = modules.first(where: { $0.type == .crossRefNative })
                             ?? modules.first(where: { $0.type == .crossRef })
@@ -359,12 +488,18 @@ class MyBibleService: ObservableObject {
     // MARK: - Inspect a SQLite3 file to determine module type
 
     private func inspectModule(at path: String) async -> MyBibleModule? {
+        return await inspectModuleWithBlob(at: path)?.0
+    }
+
+
+    private func inspectModuleWithBlob(at path: String) async -> (MyBibleModule, String, Bool)? {
         var db: OpaquePointer?
         guard sqlite3_open_v2(path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else { return nil }
         defer { sqlite3_close(db) }
 
-        // Read info table
+        // Read info table — build both the info dict and the search blob in one pass
         var info: [String: String] = [:]
+        var blobParts: [String] = []
         if let stmt = query(db: db, sql: "SELECT name, value FROM info") {
             while sqlite3_step(stmt) == SQLITE_ROW {
                 guard let keyPtr = sqlite3_column_text(stmt, 0),
@@ -372,13 +507,16 @@ class MyBibleService: ObservableObject {
                 let key = String(cString: keyPtr)
                 let val = String(cString: valPtr)
                 info[key] = val
+                blobParts.append(val)
             }
             sqlite3_finalize(stmt)
         }
+        let metaBlob = blobParts.joined(separator: " ")
 
         // Determine type from tables present + is_strong flag
         let tables      = getTableNames(db: db)
         let isStrongs   = info["is_strong"]?.lowercased() == "true"
+        let hasStrongNumbers = info["strong_numbers"]?.lowercased() == "true" || isStrongs
         let isFootnotes = info["is_footnotes"]?.lowercased() == "true"
         let desc        = (info["description"] ?? "").lowercased()
         let filename    = URL(fileURLWithPath: path).lastPathComponent.lowercased()
@@ -400,6 +538,7 @@ class MyBibleService: ObservableObject {
                                      "unger", "zondervan", "naves", "nave's"]
         let isEncyclopedia   = tables.contains("dictionary") && !isStrongs &&
                                encyclopaediaKeywords.contains(where: { desc.contains($0) || filename.contains($0) })
+        let isAtlas          = info["type"]?.lowercased() == "atlas"
         let type: ModuleType
         if tables.contains("verses")               { type = .bible }
         else if isDevotional                       { type = .devotional }
@@ -408,6 +547,7 @@ class MyBibleService: ObservableObject {
         else if isCrossRef                         { type = .crossRef }
         else if isSubheadings                      { type = .subheadings }
         else if isWordIndex                        { type = .wordIndex }
+        else if isAtlas                            { type = .atlas }
         else if tables.contains("commentaries")    { type = .commentary }
         else if tables.contains("dictionary") && isStrongs      { type = .strongs }
         else if isEncyclopedia                     { type = .encyclopedia }
@@ -419,13 +559,14 @@ class MyBibleService: ObservableObject {
             ?? URL(fileURLWithPath: path).deletingPathExtension().lastPathComponent
         let language = info["language"] ?? "en"
 
-        return MyBibleModule(
+        let module = MyBibleModule(
             name:        name,
             description: name,
             language:    language,
             type:        type,
             filePath:    path
         )
+        return (module, metaBlob, hasStrongNumbers)
     }
 
     nonisolated private func getTableNames(db: OpaquePointer?) -> [String] {
@@ -798,7 +939,8 @@ class MyBibleService: ObservableObject {
             strongsDefinition: strongs,
             kjv:               kjv,
             references:        references,
-            cognates:          cognates
+            cognates:          cognates,
+            rawDefinition:     rawDef
         )
     }
 
@@ -812,10 +954,15 @@ class MyBibleService: ObservableObject {
         if text.contains("<hr>") {
             // ETCBC format: split on <hr>, skip sections 0 and 1
             let sections = text.components(separatedBy: "<hr>")
-            guard sections.count > 2 else { return "" }
-            text = sections[2...].joined(separator: "\n")
+            if sections.count > 2 {
+                text = sections[2...].joined(separator: "\n")
+            } else if sections.count == 2 {
+                // Only one <hr> — use everything after it
+                text = sections[1]
+            }
+            // If only 1 section, fall through with full text
         } else {
-            // Standard format: skip everything before <p/>
+            // Standard format: skip everything before first <p/>
             if let r = text.range(of: "<p/>") { text = String(text[r.upperBound...]) }
             else if let r = text.range(of: "<p>") { text = String(text[r.upperBound...]) }
         }

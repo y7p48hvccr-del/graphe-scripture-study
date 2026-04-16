@@ -11,4 +11,5 @@ struct StrongsEntry {
     let kjv:                String
     let references:         String   // Cross-refs: ETCBC#, OSHL, TWOT, GK, Greek/Hebrew equivalents
     let cognates:           [String]
+    let rawDefinition:      String   // Raw HTML definition — fallback for VGNT/prose-style modules
 }

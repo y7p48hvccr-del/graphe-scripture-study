@@ -56,6 +56,7 @@ struct EPUBLibraryView: View {
     @State private var securedFolderURL: URL? = nil
     var theme:          AppTheme { AppTheme.find(themeID) }
     var filigreeAccent: Color { resolvedFiligreeAccent(colorIndex: filigreeColor, themeID: themeID) }
+    var filigreeAccentFill: Color { resolvedFiligreeAccentFill(colorIndex: filigreeColor, themeID: themeID) }
 
     @State private var bookFiles:  [BookFile] = []
     @State private var epubURLs:   [URL]  = []
@@ -178,21 +179,18 @@ struct EPUBLibraryView: View {
                         Text("Discover").tag("discover")
                     }
                     .pickerStyle(.segmented)
+                    .tint(filigreeAccentFill)
                     .padding(.horizontal, 16)
                     .padding(.vertical, 8)
-                    .background(Color.platformWindowBg)
 
                     Divider()
 
                     if activeTab == "mybooks" {
                         libraryView
-                            .background(Color.platformWindowBg)
                     } else if activeTab == "magazines" {
                         MagazinesView(booksFolder: epubFolder)
-                            .background(Color.platformWindowBg)
                     } else {
                         DiscoverView()
-                            .background(Color.platformWindowBg)
                             .onDisappear { }
                     }
                 }
@@ -483,9 +481,9 @@ struct EPUBLibraryView: View {
                         if searchMode == "inside" {
                             Button { triggerInsideSearch() } label: {
                                 Text("Go").font(.system(size: 10, weight: .semibold))
-                                    .foregroundStyle(.white)
+                                    .foregroundStyle(Color.primary)
                                     .padding(.horizontal, 6).padding(.vertical, 2)
-                                    .background(filigreeAccent)
+                                    .background(filigreeAccentFill)
                                     .clipShape(Capsule())
                             }.buttonStyle(.plain)
                         }
@@ -515,8 +513,8 @@ struct EPUBLibraryView: View {
                             }
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 5)
-                            .background(searchMode == mode ? filigreeAccent : Color.secondary.opacity(0.10))
-                            .foregroundStyle(searchMode == mode ? .white : Color.secondary)
+                            .background(searchMode == mode ? filigreeAccentFill : Color.secondary.opacity(0.10))
+                            .foregroundStyle(searchMode == mode ? Color.primary : Color.secondary)
                             .clipShape(RoundedRectangle(cornerRadius: 6))
                         }
                         .buttonStyle(.plain)
@@ -601,9 +599,9 @@ struct EPUBLibraryView: View {
                         Spacer()
                         Text("\(newBooks.count)")
                             .font(.system(size: 10))
-                            .foregroundStyle(.white)
+                            .foregroundStyle(Color.primary)
                             .padding(.horizontal, 5).padding(.vertical, 1)
-                            .background(filigreeAccent)
+                            .background(filigreeAccentFill)
                             .clipShape(Capsule())
                     }
                     .padding(.horizontal, 12)
@@ -683,7 +681,7 @@ struct EPUBLibraryView: View {
                                         HStack(spacing: 8) {
                                             Image(systemName: "bookmark.fill")
                                                 .font(.system(size: 10))
-                                                .foregroundStyle(filigreeAccent)
+                                                .foregroundStyle(Color(red: 0.30, green: 0.50, blue: 0.75))
                                             Text(bm.title)
                                                 .font(.system(size: 11, weight: .medium))
                                                 .lineLimit(1)
@@ -751,9 +749,9 @@ struct EPUBLibraryView: View {
             if newBookNames.contains(book.url.lastPathComponent) {
                 Text("New")
                     .font(.system(size: 8, weight: .bold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(Color.primary)
                     .padding(.horizontal, 5).padding(.vertical, 2)
-                    .background(filigreeAccent)
+                    .background(filigreeAccentFill)
                     .clipShape(Capsule())
                     .offset(x: -4, y: 4)
             }
@@ -1184,6 +1182,7 @@ struct DiscoverView: View {
     @AppStorage("filigreeColor") private var filigreeColor: Int    = 0
     @AppStorage("themeID")       private var themeID:       String = "light"
     var filigreeAccent: Color { resolvedFiligreeAccent(colorIndex: filigreeColor, themeID: themeID) }
+    var filigreeAccentFill: Color { resolvedFiligreeAccentFill(colorIndex: filigreeColor, themeID: themeID) }
 
     @State private var selectedSource: DiscoverSource = discoverSources[0]
     @State private var downloadStatus: String?        = nil
@@ -1277,9 +1276,9 @@ struct DiscoverView: View {
                             }
                             .padding(.horizontal, 10).padding(.vertical, 5)
                             .background(selectedSource.id == source.id
-                                        ? filigreeAccent
+                                        ? filigreeAccentFill
                                         : filigreeAccent.opacity(0.1))
-                            .foregroundStyle(selectedSource.id == source.id ? .white : filigreeAccent)
+                            .foregroundStyle(selectedSource.id == source.id ? Color.primary : filigreeAccent)
                             .clipShape(Capsule())
                         }
                         .buttonStyle(.plain)
@@ -1952,6 +1951,7 @@ struct MagazinesView: View {
     @AppStorage("filigreeColor") private var filigreeColor: Int    = 0
     @AppStorage("themeID")       private var themeID:       String = "light"
     var filigreeAccent: Color { resolvedFiligreeAccent(colorIndex: filigreeColor, themeID: themeID) }
+    var filigreeAccentFill: Color { resolvedFiligreeAccentFill(colorIndex: filigreeColor, themeID: themeID) }
 
     @State private var publications: [MagazinePublication] = []
     @State private var selectedFile: URL?     = nil

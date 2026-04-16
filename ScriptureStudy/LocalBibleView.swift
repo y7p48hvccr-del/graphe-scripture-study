@@ -7,6 +7,7 @@ struct LocalBibleView: View {
     @EnvironmentObject var bmapsService:      BMapsService
     @AppStorage("autoSummaryEnabled")   private var autoSummaryEnabled:  Bool = true
     @AppStorage("strongsFlashEnabled")   private var strongsFlashEnabled: Bool = true
+    @AppStorage("strongsOnlyFilter")      private var strongsOnly:          Bool = false
     @AppStorage("showStatusHints")        private var showStatusHints:    Bool = true
     @EnvironmentObject var ollama:            OllamaService
 
@@ -39,6 +40,15 @@ struct LocalBibleView: View {
     @State private var toastTimer:        Timer?
     @State private var scrollOffset:      CGFloat       = 0
     @State private var verseFrames:       [Int: CGFloat] = [:]
+
+    // MARK: - Navigation history (session only)
+    @State private var historyStack: [(book: Int, chapter: Int, verse: Int)] = []
+    @State private var historyIndex: Int = -1
+    @State private var suppressHistoryPush: Bool = false
+    @State private var scrollToTopTrigger: UUID = UUID()
+
+    private var canGoBack:    Bool { historyIndex > 0 }
+    private var canGoForward: Bool { historyIndex < historyStack.count - 1 }
 
     var selectedBookName: String { myBibleBookNumbers[selectedBookNumber] ?? "Unknown" }
 
@@ -131,7 +141,6 @@ struct LocalBibleView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .background(theme.background)
-        .environment(\.colorScheme, themeID == "charcoal" ? .dark : .light)
     }
 
     // MARK: - Picker bar (above Bible text)
@@ -140,7 +149,11 @@ struct LocalBibleView: View {
         HStack(spacing: 12) {
             // Bible picker — custom fixed-width button with popover list
             BiblePickerButton(
-                modules: myBible.visibleModules.filter { $0.type == .bible },
+                modules: myBible.visibleModules.filter {
+                    $0.type == .bible &&
+                    (myBible.selectedLanguageFilter == "all" || myBible.selectedLanguageFilter.isEmpty || $0.language.lowercased() == myBible.selectedLanguageFilter) &&
+                    (!strongsOnly || myBible.strongsFilePaths.contains($0.filePath))
+                },
                 selected: Binding(
                     get: { myBible.selectedBible },
                     set: { newVal in
@@ -149,9 +162,20 @@ struct LocalBibleView: View {
                         Task { await loadChapter() }
                     }
                 ),
-                accent: filigreeAccent,
+                accent: filigreeAccentFill,
                 textColor: theme.text
             )
+
+            // Strong's filter toggle
+            Toggle(isOn: $strongsOnly) {
+                Text("Strong's")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Color.secondary)
+            }
+            .toggleStyle(.switch)
+            .controlSize(.mini)
+            .tint(filigreeAccentFill)
+            .help(strongsOnly ? "Showing Strong's Bibles only" : "Filter to Strong's Bibles only")
 
             Divider().frame(height: 16)
 
@@ -195,7 +219,55 @@ struct LocalBibleView: View {
 
             Spacer()
 
-            // Comparison toggle
+            // ── History navigation ──────────────────────────────────
+            if !historyStack.isEmpty {
+                HStack(spacing: 2) {
+                    Button { goBack() } label: {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(canGoBack ? filigreeAccent : Color.secondary.opacity(0.35))
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!canGoBack)
+                    .help("Go back")
+
+                    Menu {
+                        ForEach(Array(historyStack.enumerated().reversed()), id: \.offset) { idx, entry in
+                            Button {
+                                navigateToHistoryIndex(idx)
+                            } label: {
+                                HStack {
+                                    if idx == historyIndex {
+                                        Image(systemName: "checkmark")
+                                    }
+                                    Text(historyLabel(entry))
+                                }
+                            }
+                        }
+                    } label: {
+                        Image(systemName: "clock.arrow.circlepath")
+                            .font(.system(size: 12))
+                            .foregroundStyle(filigreeAccent)
+                    }
+                    .menuStyle(.borderlessButton)
+                    .fixedSize()
+                    .help("Recent passages")
+
+                    Button { goForward() } label: {
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(canGoForward ? filigreeAccent : Color.secondary.opacity(0.35))
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!canGoForward)
+                    .help("Go forward")
+                }
+                .padding(.horizontal, 4)
+
+                Divider().frame(height: 16)
+            }
+
+
             Button {
                 withAnimation(.easeInOut(duration: 0.25)) { showComparison.toggle() }
             } label: {
@@ -281,6 +353,7 @@ struct LocalBibleView: View {
                         }
                     }
                     .padding(.bottom, 20)
+                    .id("chapterTop")
 
                     ForEach(myBible.verses) { verse in
                         let _ = annotatedVerses // observe changes
@@ -336,6 +409,14 @@ struct LocalBibleView: View {
 
             .onChange(of: selectedVerse) { v in
                 if v > 0 { proxy.scrollTo(v, anchor: .top) }
+            }
+            .onChange(of: scrollToTopTrigger) { _ in
+                let v = historyStack[safe: historyIndex]?.verse ?? 0
+                if v > 0 {
+                    proxy.scrollTo(v, anchor: .top)
+                } else {
+                    proxy.scrollTo("chapterTop", anchor: .top)
+                }
             }
             } // end ScrollViewReader
 
@@ -488,6 +569,10 @@ struct LocalBibleView: View {
             scrollOffset: scrollOffset,
             verseFrames:  verseFrames
         ) else { return }
+        // Keep current history entry in sync with scroll position
+        if historyStack.indices.contains(historyIndex) {
+            historyStack[historyIndex].verse = topVerse
+        }
         NotificationCenter.default.post(
             name: Notification.Name("verseScrolledIntoView"),
             object: nil,
@@ -497,6 +582,56 @@ struct LocalBibleView: View {
                 "verse":      topVerse
             ]
         )
+    }
+
+    // MARK: - History
+
+    private func pushHistory(book: Int, chapter: Int, verse: Int) {
+        let entry = (book: book, chapter: chapter, verse: verse)
+        // Don't push duplicate of current position
+        if let current = historyStack[safe: historyIndex],
+           current.book == book && current.chapter == chapter { return }
+        // Truncate forward history when navigating to a new location
+        if historyIndex < historyStack.count - 1 {
+            historyStack = Array(historyStack.prefix(historyIndex + 1))
+        }
+        historyStack.append(entry)
+        // Cap at 50 entries
+        if historyStack.count > 50 {
+            historyStack.removeFirst()
+        }
+        historyIndex = historyStack.count - 1
+    }
+
+    private func goBack() {
+        guard canGoBack else { return }
+        historyIndex -= 1
+        navigateToHistoryIndex(historyIndex)
+    }
+
+    private func goForward() {
+        guard canGoForward else { return }
+        historyIndex += 1
+        navigateToHistoryIndex(historyIndex)
+    }
+
+    private func navigateToHistoryIndex(_ idx: Int) {
+        guard historyStack.indices.contains(idx) else { return }
+        let entry = historyStack[idx]
+        historyIndex = idx
+        suppressHistoryPush = true
+        selectedBookNumber = entry.book
+        selectedChapter    = entry.chapter
+        selectedVerse      = entry.verse
+        updateChapterCount()
+        scrollToTopTrigger = UUID()
+        Task { await loadChapter() }
+    }
+
+    private func historyLabel(_ entry: (book: Int, chapter: Int, verse: Int)) -> String {
+        let bookName = myBibleBookNumbers[entry.book] ?? "?"
+        if entry.verse > 0 { return "\(bookName) \(entry.chapter):\(entry.verse)" }
+        return "\(bookName) \(entry.chapter)"
     }
 
     private func loadAvailableBooks() {
@@ -535,6 +670,12 @@ struct LocalBibleView: View {
         verseFrames = [:]   // reset on new chapter
         await myBible.loadChapter(module: bible, bookNumber: selectedBookNumber, chapter: selectedChapter)
 
+        // Record in navigation history
+        if !suppressHistoryPush {
+            pushHistory(book: selectedBookNumber, chapter: selectedChapter, verse: selectedVerse)
+        }
+        suppressHistoryPush = false
+
         // Flash Strong's words once per session if enabled
         if strongsFlashEnabled,
            myBible.selectedStrongs != nil,
@@ -560,5 +701,11 @@ struct LocalBibleView: View {
                 Task { await ollama.generateSummary(passage: passage, verseTexts: texts) }
             }
         }
+    }
+}
+
+private extension Array {
+    subscript(safe index: Int) -> Element? {
+        indices.contains(index) ? self[index] : nil
     }
 }

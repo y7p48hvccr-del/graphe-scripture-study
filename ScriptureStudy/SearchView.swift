@@ -21,6 +21,7 @@ struct SearchView: View {
     @AppStorage("filigreeColor") private var filigreeColor: Int   = 0
     var theme: AppTheme { AppTheme.find(themeID) }
     var filigreeAccent: Color { resolvedFiligreeAccent(colorIndex: filigreeColor, themeID: themeID) }
+    var filigreeAccentFill: Color { resolvedFiligreeAccentFill(colorIndex: filigreeColor, themeID: themeID) }
 
     // Search state
     @State private var query           = ""
@@ -96,6 +97,7 @@ struct SearchView: View {
             ForEach(SearchScope.allCases, id: \.self) { Text($0.rawValue).tag($0) }
         }
         .pickerStyle(.segmented)
+        .tint(filigreeAccentFill)
         .padding(.horizontal, 14).padding(.vertical, 8)
         .background(theme.background)
         .onChange(of: scope) { _ in runSearch() }
@@ -158,9 +160,9 @@ struct SearchView: View {
                             ForEach([("Both", Testament.both), ("Old", .ot), ("New", .nt)], id: \.0) { label, t in
                                 Button(label) { testament = t }
                                     .font(.caption)
-                                    .foregroundStyle(testament == t ? .white : filigreeAccent)
+                                    .foregroundStyle(testament == t ? Color.primary : filigreeAccent)
                                     .padding(.horizontal, 10).padding(.vertical, 4)
-                                    .background(testament == t ? filigreeAccent : filigreeAccent.opacity(0.12))
+                                    .background(testament == t ? filigreeAccentFill : filigreeAccent.opacity(0.12))
                                     .clipShape(Capsule())
                                     .buttonStyle(.plain)
                             }
@@ -214,9 +216,9 @@ struct SearchView: View {
 
                 Button("Apply Filters") { runSearch() }
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(Color.primary)
                     .padding(.horizontal, 12).padding(.vertical, 5)
-                    .background(filigreeAccent)
+                    .background(filigreeAccentFill)
                     .clipShape(RoundedRectangle(cornerRadius: 6))
                     .buttonStyle(.plain)
             }

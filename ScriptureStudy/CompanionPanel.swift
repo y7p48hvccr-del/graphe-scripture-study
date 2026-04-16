@@ -85,7 +85,7 @@ struct CompanionPanel: View {
     }
 
     var bibleModules:      [MyBibleModule] { myBible.visibleModules.filter { $0.type == .bible } }
-    var commentaryModules: [MyBibleModule] { myBible.visibleModules.filter { $0.type == .commentary } }
+    var commentaryModules: [MyBibleModule] { myBible.visibleModules.filter { $0.type == .commentary && (myBible.selectedLanguageFilter.isEmpty || $0.language.lowercased() == myBible.selectedLanguageFilter) } }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -97,9 +97,6 @@ struct CompanionPanel: View {
             Divider()
             contentArea
         }
-        .background(theme.background)
-        .foregroundStyle(theme.text)
-        .environment(\.colorScheme, themeID == "charcoal" ? .dark : .light)
         .onAppear {
             load()
             #if os(macOS)
@@ -211,7 +208,7 @@ struct CompanionPanel: View {
     // MARK: - Dictionary pickers (extracted so Swift can infer generic types)
 
     private var strongsPicker: some View {
-        let modules = myBible.visibleModules.filter { $0.type == .strongs }
+        let modules = myBible.visibleModules.filter { $0.type == .strongs && (myBible.selectedLanguageFilter.isEmpty || $0.language.lowercased() == myBible.selectedLanguageFilter) }
         let label   = myBible.selectedStrongs?.name ?? "None"
         return Menu {
             Button("None") { myBible.selectedStrongs = nil }
@@ -237,7 +234,7 @@ struct CompanionPanel: View {
     }
 
     private var dictionaryPicker: some View {
-        let modules = myBible.visibleModules.filter { $0.type == .dictionary }
+        let modules = myBible.visibleModules.filter { $0.type == .dictionary && (myBible.selectedLanguageFilter.isEmpty || $0.language.lowercased() == myBible.selectedLanguageFilter) }
         let label   = myBible.selectedDictionary?.name ?? "None"
         return Menu {
             Button("None") { myBible.selectedDictionary = nil }
@@ -263,7 +260,7 @@ struct CompanionPanel: View {
     }
 
     private var encyclopediaPicker: some View {
-        let modules = myBible.visibleModules.filter { $0.type == .encyclopedia }
+        let modules = myBible.visibleModules.filter { $0.type == .encyclopedia && (myBible.selectedLanguageFilter.isEmpty || $0.language.lowercased() == myBible.selectedLanguageFilter) }
         let label   = myBible.selectedEncyclopedia?.name ?? "None"
         return Menu {
             Button("None") { myBible.selectedEncyclopedia = nil }
@@ -940,23 +937,49 @@ struct CompanionPanel: View {
         let definition = entry.strongsDefinition.isEmpty ? entry.shortDefinition : entry.strongsDefinition
         if !definition.isEmpty {
             Text("Strong's").font(resolvedFont.weight(.semibold)).foregroundStyle(theme.secondary)
-            Text(definition).font(resolvedFont).lineSpacing(6).foregroundStyle(theme.text)
+            LinkedDefinitionView(
+                html: definition,
+                font: resolvedFont,
+                textColor: theme.text,
+                accentColor: filigreeAccent,
+                onVerseTap: { _, _, _ in },
+                onStrongsTap: { _ in }
+            )
         }
         if !entry.derivation.isEmpty {
             Divider()
             Text("Derivation").font(resolvedFont.weight(.semibold)).foregroundStyle(theme.secondary)
-            Text(entry.derivation).font(resolvedFont).lineSpacing(5).foregroundStyle(theme.text)
+            LinkedDefinitionView(
+                html: entry.derivation,
+                font: resolvedFont,
+                textColor: theme.text,
+                accentColor: filigreeAccent,
+                onVerseTap: { _, _, _ in },
+                onStrongsTap: { _ in }
+            )
         }
         if !entry.kjv.isEmpty {
             Divider()
             Text("KJV Usage").font(resolvedFont.weight(.semibold)).foregroundStyle(theme.secondary)
-            Text(entry.kjv).font(resolvedFont).lineSpacing(5).foregroundStyle(theme.text)
+            LinkedDefinitionView(
+                html: entry.kjv,
+                font: resolvedFont,
+                textColor: theme.text,
+                accentColor: filigreeAccent,
+                onVerseTap: { _, _, _ in },
+                onStrongsTap: { _ in }
+            )
         }
         if !entry.cognates.isEmpty {
             Divider()
             Text("Cognates").font(resolvedFont.weight(.semibold)).foregroundStyle(theme.secondary)
-            Text(entry.cognates.joined(separator: ", "))
-                .font(resolvedFont).foregroundStyle(theme.secondary)
+            HStack(spacing: 6) {
+                ForEach(entry.cognates, id: \.self) { cognate in
+                    CognateButton(number: cognate, accent: filigreeAccent,
+                                  module: myBible.selectedStrongs ?? myBible.selectedDictionary)
+                }
+                Spacer()
+            }
         }
     }
 
@@ -1227,3 +1250,33 @@ struct BibleWebView: NSViewRepresentable {
 }
 #endif
 
+
+// MARK: - Cognate Button
+
+struct CognateButton: View {
+    let number: String
+    let accent:  Color
+    let module:  MyBibleModule?
+
+    @EnvironmentObject var myBible: MyBibleService
+    @State private var showPopover = false
+
+    var body: some View {
+        Button {
+            showPopover = true
+        } label: {
+            Text(number)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(accent)
+                .padding(.horizontal, 6).padding(.vertical, 2)
+                .background(accent.opacity(0.12))
+                .clipShape(RoundedRectangle(cornerRadius: 4))
+        }
+        .buttonStyle(.plain)
+        .popover(isPresented: $showPopover, arrowEdge: .bottom) {
+            StrongsPreviewPopover(number: number, accent: accent, module: module)
+                .environmentObject(myBible)
+                .frame(width: 300)
+        }
+    }
+}

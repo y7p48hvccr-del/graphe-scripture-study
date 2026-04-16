@@ -137,7 +137,7 @@ struct CommentaryView: View {
                                         .font(.caption.weight(.bold))
                                         .foregroundStyle(.white)
                                         .padding(.horizontal, 8).padding(.vertical, 3)
-                                        .background(filigreeAccent)
+                                        .background(filigreeAccentFill)
                                         .clipShape(Capsule())
                                     Text(entry.text)
                                         .font(resolvedFont).lineSpacing(6)

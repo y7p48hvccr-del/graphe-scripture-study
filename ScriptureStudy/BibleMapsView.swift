@@ -348,22 +348,6 @@ struct MapDetailView: View {
                     isLoading        = false
                 }
 
-                Divider()
-
-                // ── Named locations ──────────────────────────────────
-                if !displayMap.places.isEmpty {
-                    Text("Named Locations")
-                        .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                        .textCase(.uppercase).tracking(0.6)
-                        .padding(.horizontal, 12).padding(.top, 10).padding(.bottom, 4)
-
-                    ForEach(displayMap.places) { place in
-                        MapPlaceRow(place: place, theme: theme, filigreeAccent: filigreeAccent,
-                                    resolvedFont: resolvedFont)
-                        Divider().padding(.leading, 12)
-                    }
-                }
-
                 Spacer().frame(height: 20)
             }
         }
@@ -540,22 +524,23 @@ struct MapHTMLView: WKViewRepresentable {
         func webView(_ webView: WKWebView,
                      decidePolicyFor action: WKNavigationAction,
                      decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
-            guard let url = action.request.url,
-                  action.navigationType == .linkActivated else {
+            guard let url = action.request.url else {
                 decisionHandler(.allow); return
             }
-            let raw = url.absoluteString
-            if raw.hasPrefix("B:") {
-                handleBibleRef(String(raw.dropFirst(2)))
+            let rawURL = url.absoluteString
+            print("[BMaps] link tapped: \(rawURL) type=\(action.navigationType.rawValue)")
+            let decoded = rawURL.removingPercentEncoding ?? rawURL
+            let upper = decoded.uppercased().hasPrefix("B:") ? "B:" + decoded.dropFirst(2) :
+                        decoded.uppercased().hasPrefix("S:") ? "S:" + decoded.dropFirst(2) : decoded
+            if upper.hasPrefix("B:") {
+                handleBibleRef(String(upper.dropFirst(2)))
                 decisionHandler(.cancel); return
             }
-            if raw.hasPrefix("S:") {
-                let mapID = (String(raw.dropFirst(2)).removingPercentEncoding
-                             ?? String(raw.dropFirst(2)))
-                onMapLink?(mapID)
+            if upper.hasPrefix("S:") {
+                onMapLink?(String(upper.dropFirst(2)))
                 decisionHandler(.cancel); return
             }
-            decisionHandler(.cancel)
+            decisionHandler(.allow)
         }
 
         private func handleBibleRef(_ ref: String) {

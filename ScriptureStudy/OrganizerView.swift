@@ -135,10 +135,15 @@ struct OrganizerView: View {
             }
             .font(.system(size: 12, weight: .semibold))
             .help("Jump to today")
-            .foregroundStyle(.white)
             .padding(.horizontal, 12).padding(.vertical, 5)
             .background(calRed)
             .clipShape(Capsule())
+            .overlay(
+                Text("Today")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(Color(red: 1, green: 1, blue: 1))
+                    .allowsHitTesting(false)
+            )
             #if os(macOS)
             HelpButton(page: "organizer", anchor: "calendar")
             .padding(.trailing, 12)

@@ -76,6 +76,9 @@ class BMapsParser {
         sqlite3_finalize(imgStmt)
 
         // 2. Load all dictionary entries
+        // Detect whether this is an encrypted .graphe module
+        let isGraphe = dbPath.hasSuffix(".graphe")
+
         var maps: [BibleMap] = []
         var places: [BiblePlaceEntry] = []
         var mapTitleLookup: [String: String] = [:]  // id -> title
@@ -88,11 +91,23 @@ class BMapsParser {
 
         var rawEntries: [(topic: String, definition: String)] = []
         while sqlite3_step(stmt) == SQLITE_ROW {
-            guard
-                let topicC = sqlite3_column_text(stmt, 0),
-                let defC   = sqlite3_column_text(stmt, 1)
-            else { continue }
-            rawEntries.append((String(cString: topicC), String(cString: defC)))
+            guard let topicC = sqlite3_column_text(stmt, 0) else { continue }
+            let topic = String(cString: topicC)
+
+            // For .graphe modules the definition column is AES-256-CBC encrypted;
+            // read it as a blob and decrypt — same path as MyBibleService.col().
+            let definition: String
+            if isGraphe {
+                let ptr = sqlite3_column_blob(stmt, 1)?.assumingMemoryBound(to: UInt8.self)
+                let len = sqlite3_column_bytes(stmt, 1)
+                guard let decrypted = grapheDecrypt(ptr, len, filePath: dbPath) else { continue }
+                definition = decrypted
+            } else {
+                guard let defC = sqlite3_column_text(stmt, 1) else { continue }
+                definition = String(cString: defC)
+            }
+
+            rawEntries.append((topic, definition))
         }
         sqlite3_finalize(stmt)
 

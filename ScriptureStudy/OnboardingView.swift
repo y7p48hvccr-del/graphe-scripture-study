@@ -10,6 +10,7 @@ struct OnboardingView: View {
     @AppStorage("filigreeColor") private var filigreeColor: Int    = 0
     @AppStorage("themeID")       private var themeID:       String = "light"
     var filigreeAccent: Color { resolvedFiligreeAccent(colorIndex: filigreeColor, themeID: themeID) }
+    var filigreeAccentFill: Color { resolvedFiligreeAccentFill(colorIndex: filigreeColor, themeID: themeID) }
 
     private let pages: [(icon: String, title: String, body: String, action: String?)] = [
         (
@@ -108,7 +109,7 @@ struct OnboardingView: View {
                         }
                         .foregroundStyle(.white)
                         .padding(.horizontal, 20).padding(.vertical, 8)
-                        .background(filigreeAccent)
+                        .background(filigreeAccentFill)
                         .clipShape(Capsule())
                         .buttonStyle(.plain)
                     } else {
@@ -129,7 +130,7 @@ struct OnboardingView: View {
                         Button("Start Reading") { onDismiss() }
                             .foregroundStyle(.white)
                             .padding(.horizontal, 20).padding(.vertical, 8)
-                            .background(filigreeAccent)
+                            .background(filigreeAccentFill)
                             .clipShape(Capsule())
                             .buttonStyle(.plain)
                     }

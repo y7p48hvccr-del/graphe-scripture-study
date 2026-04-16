@@ -1,125 +1,180 @@
 import SwiftUI
 
+// MARK: - Comparison Panel View
+// Shows a second Bible translation below the main reading view for side-by-side comparison
 
 struct ComparisonPanelView: View {
     let bookNumber:  Int
     let chapter:     Int
     let syncedVerse: Int
-    var onClose: (() -> Void)? = nil
+    let onClose:     () -> Void
 
     @EnvironmentObject var myBible: MyBibleService
 
-    @AppStorage("comparisonBiblePath") private var comparisonBiblePath: String = ""
-    @AppStorage("fontSize")            private var fontSize:  Double = 16
-    @AppStorage("fontName")            private var fontName:  String = ""
-    @AppStorage("themeID")             private var themeID:   String = "light"
-    @AppStorage("filigreeColor")       private var filigreeColor: Int = 0
-
-    var theme:  AppTheme { AppTheme.find(themeID) }
-    var accent: Color { resolvedFiligreeAccent(colorIndex: filigreeColor, themeID: themeID) }
-    var resolvedFont: Font {
-        guard !fontName.isEmpty else { return .system(size: fontSize - 1) }
-        return .custom(fontName, size: fontSize - 1)
-    }
-
-    @State private var verses:   [MyBibleVerse] = []
-    @State private var module:   MyBibleModule? = nil
+    @State private var comparisonModule: MyBibleModule? = nil
+    @State private var verses:           [MyBibleVerse] = []
     @State private var isLoading = false
 
-    private var bibleModules: [MyBibleModule] {
-        myBible.modules.filter { $0.type == .bible && $0.filePath != myBible.selectedBible?.filePath }
+    @AppStorage("fontSize")      private var fontSize:      Double = 16
+    @AppStorage("fontName")      private var fontName:      String = ""
+    @AppStorage("themeID")       private var themeID:       String = "light"
+    @AppStorage("filigreeColor") private var filigreeColor: Int    = 0
+
+    var theme:         AppTheme { AppTheme.find(themeID) }
+    var filigreeAccent: Color   { resolvedFiligreeAccent(colorIndex: filigreeColor, themeID: themeID) }
+    var resolvedFont:  Font {
+        fontName.isEmpty ? .system(size: fontSize) : .custom(fontName, size: fontSize)
+    }
+
+    private var availableBibles: [MyBibleModule] {
+        myBible.visibleModules.filter {
+            $0.type == .bible &&
+            $0.filePath != myBible.selectedBible?.filePath &&
+            (myBible.selectedLanguageFilter == "all" || myBible.selectedLanguageFilter.isEmpty ||
+             $0.language.lowercased() == myBible.selectedLanguageFilter)
+        }
     }
 
     var body: some View {
         VStack(spacing: 0) {
-            // Picker is the header — no label needed
-            HStack(spacing: 8) {
-                BiblePickerButton(
-                    modules: bibleModules,
-                    selected: $module,
-                    accent: accent,
-                    textColor: Color.primary
-                )
-                .onChange(of: module) { _ in load() }
-                .onAppear { if module == nil { module = bibleModules.first } }
-                Spacer()
-                if isLoading { ProgressView().controlSize(.mini) }
-                if let close = onClose {
-                    Button { close() } label: {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 11))
-                            .foregroundStyle(.secondary)
+            // Header bar
+            HStack(spacing: 10) {
+                Text("Compare")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.secondary)
+
+                Picker("", selection: $comparisonModule) {
+                    Text("Choose translation…").tag(Optional<MyBibleModule>.none)
+                    ForEach(availableBibles) { m in
+                        Text(m.name).tag(Optional(m))
                     }
-                    .buttonStyle(.plain)
-                    .help("Close comparison")
                 }
+                .pickerStyle(.menu)
+                .font(.system(size: 12))
+                .frame(maxWidth: 240)
+
+                Spacer()
+
+                if isLoading {
+                    ProgressView().controlSize(.small)
+                }
+
+                Button {
+                    onClose()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Close comparison")
             }
-            .padding(.horizontal, 10).padding(.vertical, 6)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
             .background(Color.platformWindowBg)
 
             Divider()
 
-            if module == nil {
-                VStack { Spacer(); Text("Select a Bible above").font(.caption).foregroundStyle(.secondary); Spacer() }
-                    .background(theme.background)
+            // Verse list
+            if verses.isEmpty && !isLoading {
+                VStack {
+                    Spacer()
+                    Text(comparisonModule == nil
+                         ? "Select a translation to compare"
+                         : "No verses found")
+                        .foregroundStyle(.secondary)
+                        .font(.system(size: 13))
+                    Spacer()
+                }
             } else {
                 ScrollViewReader { proxy in
                     ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 0) {
+                        LazyVStack(alignment: .leading, spacing: 2) {
                             ForEach(verses) { verse in
-                                HStack(alignment: .top, spacing: 6) {
+                                HStack(alignment: .top, spacing: 8) {
                                     Text("\(verse.verse)")
-                                        .font(.system(size: fontSize * 0.75))
-                                        .foregroundStyle(accent)
-                                        .frame(minWidth: 24, alignment: .trailing)
-                                        .padding(.top, 2)
-                                    Text(ScriptureSlideUpPanel.cleanVerseText(verse.text))
+                                        .font(.system(size: 11, weight: .bold))
+                                        .foregroundStyle(
+                                            verse.verse == syncedVerse
+                                            ? .white
+                                            : filigreeAccent.opacity(0.7)
+                                        )
+                                        .frame(minWidth: 18, alignment: .trailing)
+                                        .padding(.horizontal, 3).padding(.vertical, 2)
+                                        .background(
+                                            verse.verse == syncedVerse
+                                            ? filigreeAccent : Color.clear
+                                        )
+                                        .clipShape(RoundedRectangle(cornerRadius: 4))
+
+                                    Text(verse.text)
                                         .font(resolvedFont)
                                         .foregroundStyle(theme.text)
-                                        .fixedSize(horizontal: false, vertical: true)
+                                        .lineSpacing(4)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
                                 }
-                                .padding(.horizontal, 12).padding(.vertical, 3)
-                                .background(verse.verse == syncedVerse ? accent.opacity(0.08) : Color.clear)
+                                .padding(.horizontal, 8).padding(.vertical, 3)
+                                .background(
+                                    verse.verse == syncedVerse
+                                    ? filigreeAccent.opacity(0.08) : Color.clear
+                                )
                                 .id(verse.verse)
                             }
                         }
                         .padding(.vertical, 8)
                     }
-                    .background(theme.background)
-                    // Sync scroll when user taps a verse in the main panel
+                    .background(Color.white)
                     .onChange(of: syncedVerse) { v in
-                        if v > 0 { withAnimation { proxy.scrollTo(v, anchor: .top) } }
+                        if v > 0 {
+                            withAnimation { proxy.scrollTo(v, anchor: .center) }
+                        }
                     }
-                    .onChange(of: chapter) { _ in load() }
-                    // Sync scroll as user scrolls the main Bible panel
-                    .onReceive(NotificationCenter.default.publisher(
-                        for: Notification.Name("verseScrolledIntoView"))) { note in
-                        guard
-                            let bn = note.userInfo?["bookNumber"] as? Int,
-                            let ch = note.userInfo?["chapter"]    as? Int,
-                            let vs = note.userInfo?["verse"]      as? Int,
-                            bn == bookNumber, ch == chapter
-                        else { return }
-                        proxy.scrollTo(vs, anchor: .top)
+                    .onChange(of: verses) { _ in
+                        if syncedVerse > 0 {
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                                withAnimation { proxy.scrollTo(syncedVerse, anchor: .center) }
+                            }
+                        }
                     }
                 }
             }
         }
         .background(theme.background)
-        .onAppear { load() }
+        .onChange(of: comparisonModule) { _ in
+            Task { await loadVerses() }
+        }
+        .onChange(of: bookNumber) { _ in
+            Task { await loadVerses() }
+        }
+        .onChange(of: chapter) { _ in
+            Task { await loadVerses() }
+        }
+        .onAppear {
+            // Auto-select second Bible if available
+            if comparisonModule == nil {
+                comparisonModule = availableBibles.first
+            }
+            Task { await loadVerses() }
+        }
     }
 
-    private func load() {
-        guard let mod = module else { return }
+    private func loadVerses() async {
+        guard let module = comparisonModule else { verses = []; return }
         isLoading = true
-        Task {
-            let loaded = await myBible.loadChapterVerses(module: mod,
-                                                          bookNumber: bookNumber,
-                                                          chapter: chapter)
-            await MainActor.run {
-                verses    = loaded
-                isLoading = false
-            }
+        let loaded = await myBible.loadChapterVerses(
+            module: module,
+            bookNumber: bookNumber,
+            chapter: chapter
+        )
+        verses = loaded.map { v in
+            MyBibleVerse(
+                book: v.book,
+                chapter: v.chapter,
+                verse: v.verse,
+                text: StrongsParser.stripAllTags(v.text)
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+            )
         }
+        isLoading = false
     }
 }

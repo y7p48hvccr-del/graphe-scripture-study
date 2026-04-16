@@ -71,6 +71,7 @@ struct SettingsView: View {
     @AppStorage("showOnboardingAgain") private var showOnboardingAgain: Bool   = true
     @AppStorage("autoSummaryEnabled")  private var autoSummaryEnabled:  Bool   = true
     @AppStorage("showGlossNotes")      private var showGlossNotes:      Bool   = true
+    @AppStorage("strongsOnlyFilter")   private var strongsOnly:          Bool   = false
     @AppStorage("showLaunchAnimation") private var showLaunchAnimation: Bool   = true
     @AppStorage("detectScriptureRefs") private var detectScriptureRefs: Bool   = false
     @AppStorage("preCacheEpubPages")   private var preCacheEpubPages:   Bool   = false
@@ -86,6 +87,7 @@ struct SettingsView: View {
     @State private var customFont: String = ""
 
     var filigreeAccent: Color { resolvedFiligreeAccent(colorIndex: filigreeColor, themeID: themeID) }
+    var filigreeAccentFill: Color { resolvedFiligreeAccentFill(colorIndex: filigreeColor, themeID: themeID) }
 
     private var appVersion: String {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
@@ -110,6 +112,7 @@ struct SettingsView: View {
             }
             .frame(minWidth: 480, maxWidth: 560)
             .background(Color.platformWindowBg)
+            .tint(filigreeAccentFill)
             Divider()
             rightPanel
                 .frame(width: 240)
@@ -324,7 +327,7 @@ struct SettingsView: View {
                         icon: "envelope.fill",
                         title: "Get in Touch",
                         subtitle: "Send feedback",
-                        color: filigreeAccent,
+                        color: Color(red: 0.20, green: 0.47, blue: 0.95),
                         url: "mailto:support@graphescripture.app"
                     )
 
@@ -446,7 +449,7 @@ struct SettingsView: View {
                     }
                     HStack(spacing: 10) {
                         Text("A").font(.system(size: 12)).foregroundStyle(.secondary)
-                        Slider(value: $fontSize, in: 12...28, step: 1).tint(filigreeAccent)
+                        Slider(value: $fontSize, in: 12...28, step: 1).tint(filigreeAccentFill)
                         Text("A").font(.system(size: 22)).foregroundStyle(.secondary)
                     }
                     let theme = AppTheme.find(themeID)
@@ -508,7 +511,7 @@ struct SettingsView: View {
                         }
                         HStack(spacing: 8) {
                             Text("Subtle").font(.caption).foregroundStyle(.secondary)
-                            Slider(value: $filigreeIntensity, in: 0.1...1.0, step: 0.05).tint(filigreeAccent)
+                            Slider(value: $filigreeIntensity, in: 0.1...1.0, step: 0.05).tint(filigreeAccentFill)
                             Text("Strong").font(.caption).foregroundStyle(.secondary)
                         }
                     }
@@ -528,6 +531,14 @@ struct SettingsView: View {
                 Toggle("Show translation gloss notes", isOn: $showGlossNotes)
                 Text("Shows a small indicator on verses that contain translator's notes. Tap it to see the original language gloss.")
                     .font(.caption).foregroundStyle(.secondary)
+                Toggle(isOn: $detectScriptureRefs) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Enrich book text with interactive links").font(.body)
+                        Text("Detects Bible references (e.g. John 3:16) in your books and makes them tappable, opening directly in the Bible tab. May slow page loading on long chapters.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                .onChange(of: detectScriptureRefs) { _ in EPUBParser.invalidateCache() }
             }
 
             sectionDivider
@@ -567,18 +578,18 @@ struct SettingsView: View {
                         }
                         .font(.caption.weight(.semibold)).foregroundStyle(.white)
                         .padding(.horizontal, 10).padding(.vertical, 5)
-                        .background(filigreeAccent)
+                        .background(filigreeAccentFill)
                         .clipShape(RoundedRectangle(cornerRadius: 6)).buttonStyle(.plain)
 
                         Button("Buy Credits") {
                             NSWorkspace.shared.open(URL(string: "https://console.anthropic.com/settings/billing")!)
                         }
-                        .font(.caption.weight(.semibold)).foregroundStyle(filigreeAccent)
+                        .font(.caption.weight(.semibold)).foregroundStyle(Color(red: 0.20, green: 0.47, blue: 0.95))
                         .padding(.horizontal, 10).padding(.vertical, 5)
-                        .background(filigreeAccent.opacity(0.12))
+                        .background(Color(red: 0.20, green: 0.47, blue: 0.95).opacity(0.12))
                         .clipShape(RoundedRectangle(cornerRadius: 6))
                         .overlay(RoundedRectangle(cornerRadius: 6)
-                            .stroke(filigreeAccent.opacity(0.4), lineWidth: 0.5))
+                            .stroke(Color(red: 0.20, green: 0.47, blue: 0.95).opacity(0.4), lineWidth: 0.5))
                         .buttonStyle(.plain)
                     }
                 }
@@ -598,7 +609,7 @@ struct SettingsView: View {
                 if ollama.ollamaReady && !ollama.availableModels.isEmpty {
                     Picker("Model", selection: $ollama.selectedModel) {
                         ForEach(ollama.availableModels, id: \.self) { m in Text(m).tag(m) }
-                    }.tint(filigreeAccent)
+                    }.tint(filigreeAccentFill)
                 }
             } header: {
                 Text("AI Engine — Ollama")
@@ -629,15 +640,6 @@ struct SettingsView: View {
                         .font(.caption).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }.padding(.vertical, 4)
-
-                Toggle(isOn: $detectScriptureRefs) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Enrich book text with interactive links").font(.body)
-                        Text("Works offline — detects Bible references (e.g. John 3:16) in your books and makes them tappable, opening directly in the Bible tab. Useful when iCloud or internet access is unavailable. May slow page loading on long chapters.")
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
-                }
-                .onChange(of: detectScriptureRefs) { _ in EPUBParser.invalidateCache() }
 
                 Toggle(isOn: $preCacheEpubPages) {
                     VStack(alignment: .leading, spacing: 2) {
@@ -693,6 +695,7 @@ struct FontChip: View {
     @AppStorage("filigreeColor") private var filigreeColor: Int    = 0
     @AppStorage("themeID")       private var themeID:       String = "light"
     var filigreeAccent: Color { resolvedFiligreeAccent(colorIndex: filigreeColor, themeID: themeID) }
+    var filigreeAccentFill: Color { resolvedFiligreeAccentFill(colorIndex: filigreeColor, themeID: themeID) }
 
     var displayFont: Font {
         preset.value.isEmpty ? .system(size: 13) : .custom(preset.value, size: 13)
@@ -721,6 +724,7 @@ struct ThemeSwatch: View {
     @AppStorage("filigreeColor") private var filigreeColor: Int    = 0
     @AppStorage("themeID")       private var themeID:       String = "light"
     var filigreeAccent: Color { resolvedFiligreeAccent(colorIndex: filigreeColor, themeID: themeID) }
+    var filigreeAccentFill: Color { resolvedFiligreeAccentFill(colorIndex: filigreeColor, themeID: themeID) }
 
     var body: some View {
         VStack(spacing: 5) {
