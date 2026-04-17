@@ -43,7 +43,7 @@
     justify-content: center;
     position: relative;
     overflow: hidden;
-    padding: 60px 24px;
+    padding: 120px 24px 60px;
   }
 
   .hero::before {
@@ -439,6 +439,30 @@
 </style>
 </head>
 <body>
+
+<!-- NAV -->
+<nav style="
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  z-index: 100;
+  background: rgba(30,45,61,0.92);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  padding: 14px 40px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+">
+  <a href="index.html" style="font-family:'Cormorant Garamond',serif; font-size:18px; font-weight:300; color:rgba(255,255,255,0.85); text-decoration:none;">
+    <em style="font-style:italic; color:#d4aa55;">Graphē</em> One™
+  </a>
+  <div style="display:flex; gap:28px; align-items:center;">
+    <a href="support.html" style="font-family:'Crimson Pro',serif; font-size:15px; font-weight:300; color:rgba(255,255,255,0.55); text-decoration:none; letter-spacing:0.05em; transition:color 0.2s;" onmouseover="this.style.color='#d4aa55'" onmouseout="this.style.color='rgba(255,255,255,0.55)'">Support</a>
+    <a href="privacy.html" style="font-family:'Crimson Pro',serif; font-size:15px; font-weight:300; color:rgba(255,255,255,0.55); text-decoration:none; letter-spacing:0.05em; transition:color 0.2s;" onmouseover="this.style.color='#d4aa55'" onmouseout="this.style.color='rgba(255,255,255,0.55)'">Privacy</a>
+    <a href="mailto:support@graphe.one" style="font-family:'Crimson Pro',serif; font-size:15px; font-weight:300; color:rgba(255,255,255,0.55); text-decoration:none; letter-spacing:0.05em; transition:color 0.2s;" onmouseover="this.style.color='#d4aa55'" onmouseout="this.style.color='rgba(255,255,255,0.55)'">Contact</a>
+  </div>
+</nav>
 
 <!-- HERO -->
 <section class="hero">
