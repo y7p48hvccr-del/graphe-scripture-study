@@ -1,291 +1,558 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Graphē · Scripture Study Pro</title>
-  <meta name="description" content="Graphē is a powerful, elegant Bible study app for Mac and iPhone. Read, study and explore Scripture with MyBible modules, Strong's lexicons, commentaries and more.">
-  <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Studio Graphē One — ScriptureStudy Pro for Mac</title>
+<meta name="description" content="Graphē One ScriptureStudy Pro — a beautifully crafted Bible study app for Mac. Hundreds of free resources in dozens of languages.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,300;1,400&family=Crimson+Pro:wght@300;400&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --sky: #8fa1b5;
+    --sky-light: #b8cad8;
+    --sky-dark: #5d7289;
+    --gold: #b8943a;
+    --gold-light: #d4aa55;
+    --navy: #1e2d3d;
+    --navy-light: #2e4058;
+    --cream: #f5f0e8;
+    --cream-dark: #e8e0d0;
+    --text: #1a2a38;
+    --text-muted: #4a6070;
+  }
 
-    :root {
-      --sky:   #a8c8e0;
-      --gold:  #c8a040;
-      --dark:  #1a2e1a;
-      --text:  #2c2c2c;
-      --muted: #666;
-      --bg:    #f8f7f4;
-    }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
 
-    body {
-      font-family: Georgia, 'Times New Roman', serif;
-      background: var(--bg);
-      color: var(--text);
-      line-height: 1.7;
-    }
+  html { scroll-behavior: smooth; }
 
-    /* NAV */
-    nav {
-      background: var(--sky);
-      padding: 0 2rem;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      height: 56px;
-      position: sticky;
-      top: 0;
-      z-index: 100;
-    }
-    nav .brand {
-      font-size: 1.25rem;
-      font-style: italic;
-      color: var(--dark);
-      font-weight: 400;
-      text-decoration: none;
-    }
-    nav .brand span {
-      font-size: 0.7rem;
-      font-style: normal;
-      letter-spacing: 0.15em;
-      display: block;
-      color: #3a5a3a;
-      margin-top: -4px;
-    }
-    nav ul {
-      list-style: none;
-      display: flex;
-      gap: 2rem;
-    }
-    nav ul a {
-      text-decoration: none;
-      color: var(--dark);
-      font-family: -apple-system, sans-serif;
-      font-size: 0.875rem;
-    }
-    nav ul a:hover { color: var(--gold); }
+  body {
+    font-family: 'Crimson Pro', Georgia, serif;
+    background: var(--cream);
+    color: var(--text);
+    overflow-x: hidden;
+  }
 
-    /* HERO */
-    .hero {
-      background: var(--sky);
-      padding: 5rem 2rem 4rem;
-      text-align: center;
-    }
-    .hero-icon {
-      width: 120px;
-      height: 120px;
-      border-radius: 26px;
-      margin: 0 auto 2rem;
-      background: var(--sky);
-      border: 2px solid rgba(200,160,64,0.3);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      overflow: hidden;
-    }
-    .hero h1 {
-      font-size: clamp(2.5rem, 6vw, 4rem);
-      font-style: italic;
-      font-weight: 400;
-      color: var(--dark);
-      letter-spacing: 0.02em;
-    }
-    .hero .subtitle {
-      font-family: -apple-system, sans-serif;
-      font-size: 0.8rem;
-      letter-spacing: 0.3em;
-      color: #3a5a3a;
-      margin-top: 0.25rem;
-      text-transform: uppercase;
-    }
-    .hero .tagline {
-      margin-top: 1.5rem;
-      font-size: 1.2rem;
-      color: #2a4a2a;
-      max-width: 560px;
-      margin-left: auto;
-      margin-right: auto;
-    }
-    .hero .cta {
-      display: inline-block;
-      margin-top: 2rem;
-      padding: 0.75rem 2rem;
-      background: var(--gold);
-      color: white;
-      text-decoration: none;
-      font-family: -apple-system, sans-serif;
-      font-size: 0.95rem;
-      border-radius: 8px;
-      letter-spacing: 0.02em;
-    }
-    .hero .cta:hover { background: #b08830; }
-    .hero .platforms {
-      margin-top: 1rem;
-      font-family: -apple-system, sans-serif;
-      font-size: 0.8rem;
-      color: #3a5a3a;
-    }
+  /* HERO */
+  .hero {
+    min-height: 100vh;
+    background: linear-gradient(160deg, var(--sky-dark) 0%, var(--sky) 45%, var(--sky-light) 100%);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    overflow: hidden;
+    padding: 60px 24px;
+  }
 
-    /* FEATURES */
-    .features {
-      max-width: 1000px;
-      margin: 5rem auto;
-      padding: 0 2rem;
-    }
-    .features h2 {
-      text-align: center;
-      font-size: 1.8rem;
-      font-style: italic;
-      font-weight: 400;
-      margin-bottom: 3rem;
-      color: var(--dark);
-    }
-    .feature-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-      gap: 2rem;
-    }
-    .feature-card {
-      background: white;
-      border-radius: 12px;
-      padding: 1.75rem;
-      border: 1px solid rgba(200,160,64,0.15);
-    }
-    .feature-card .icon {
-      font-size: 1.8rem;
-      margin-bottom: 0.75rem;
-    }
-    .feature-card h3 {
-      font-size: 1.05rem;
-      font-weight: 600;
-      font-family: -apple-system, sans-serif;
-      margin-bottom: 0.5rem;
-      color: var(--dark);
-    }
-    .feature-card p {
-      font-size: 0.95rem;
-      color: var(--muted);
-      font-family: -apple-system, sans-serif;
-      line-height: 1.6;
-    }
+  .hero::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(ellipse at 70% 30%, rgba(184,148,58,0.12) 0%, transparent 60%),
+                radial-gradient(ellipse at 20% 80%, rgba(30,45,61,0.15) 0%, transparent 50%);
+  }
 
-    /* ABOUT */
-    .about {
-      background: var(--sky);
-      padding: 4rem 2rem;
-      text-align: center;
-    }
-    .about h2 {
-      font-size: 1.8rem;
-      font-style: italic;
-      font-weight: 400;
-      margin-bottom: 1.25rem;
-      color: var(--dark);
-    }
-    .about p {
-      max-width: 600px;
-      margin: 0 auto;
-      font-family: -apple-system, sans-serif;
-      font-size: 0.95rem;
-      color: #2a4a2a;
-      line-height: 1.8;
-    }
+  .hero-logo {
+    width: 220px;
+    height: 220px;
+    border-radius: 38px;
+    object-fit: cover;
+    box-shadow: 0 30px 80px rgba(30,45,61,0.4), 0 0 0 1px rgba(255,255,255,0.15);
+    animation: floatIn 1.4s cubic-bezier(0.16, 1, 0.3, 1) both;
+    position: relative;
+    z-index: 1;
+  }
 
-    /* FOOTER */
-    footer {
-      background: var(--dark);
-      color: rgba(255,255,255,0.6);
-      text-align: center;
-      padding: 2rem;
-      font-family: -apple-system, sans-serif;
-      font-size: 0.8rem;
-    }
-    footer a { color: var(--gold); text-decoration: none; }
-    footer a:hover { text-decoration: underline; }
-    footer .links { margin-bottom: 0.5rem; display: flex; gap: 1.5rem; justify-content: center; }
-  </style>
+  .hero-badge {
+    margin-top: 36px;
+    text-align: center;
+    position: relative;
+    z-index: 1;
+    animation: floatIn 1.4s 0.2s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  .studio-name {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 13px;
+    font-weight: 400;
+    letter-spacing: 0.3em;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.65);
+    margin-bottom: 8px;
+  }
+
+  .app-name {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: clamp(42px, 8vw, 72px);
+    font-weight: 300;
+    color: #fff;
+    line-height: 1.05;
+    letter-spacing: -0.01em;
+  }
+
+  .app-name em {
+    font-style: italic;
+    color: var(--gold-light);
+  }
+
+  .app-subtitle {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 18px;
+    font-weight: 400;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.6);
+    margin-top: 6px;
+  }
+
+  .hero-tagline {
+    margin-top: 24px;
+    font-size: 17px;
+    font-weight: 300;
+    color: rgba(255,255,255,0.8);
+    text-align: center;
+    max-width: 480px;
+    line-height: 1.6;
+    position: relative;
+    z-index: 1;
+    animation: floatIn 1.4s 0.35s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  .hero-cta {
+    margin-top: 40px;
+    display: flex;
+    gap: 16px;
+    flex-wrap: wrap;
+    justify-content: center;
+    position: relative;
+    z-index: 1;
+    animation: floatIn 1.4s 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  .btn-primary {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 14px 32px;
+    background: var(--gold);
+    color: #fff;
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 16px;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-decoration: none;
+    border-radius: 4px;
+    transition: background 0.2s, transform 0.2s, box-shadow 0.2s;
+    box-shadow: 0 4px 20px rgba(184,148,58,0.4);
+  }
+
+  .btn-primary:hover {
+    background: var(--gold-light);
+    transform: translateY(-2px);
+    box-shadow: 0 8px 30px rgba(184,148,58,0.5);
+  }
+
+  .btn-secondary {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 14px 32px;
+    background: rgba(255,255,255,0.15);
+    color: #fff;
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 16px;
+    font-weight: 400;
+    letter-spacing: 0.05em;
+    text-decoration: none;
+    border-radius: 4px;
+    border: 1px solid rgba(255,255,255,0.3);
+    transition: background 0.2s, transform 0.2s;
+    backdrop-filter: blur(8px);
+  }
+
+  .btn-secondary:hover {
+    background: rgba(255,255,255,0.25);
+    transform: translateY(-2px);
+  }
+
+  .scroll-hint {
+    position: absolute;
+    bottom: 32px;
+    left: 50%;
+    transform: translateX(-50%);
+    color: rgba(255,255,255,0.4);
+    font-size: 11px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    animation: pulse 2s ease-in-out infinite;
+  }
+
+  /* DIVIDER */
+  .gold-rule {
+    width: 60px;
+    height: 1px;
+    background: var(--gold);
+    margin: 0 auto;
+    opacity: 0.6;
+  }
+
+  /* FEATURES */
+  .section {
+    padding: 100px 24px;
+    max-width: 1100px;
+    margin: 0 auto;
+  }
+
+  .section-label {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 11px;
+    font-weight: 400;
+    letter-spacing: 0.4em;
+    text-transform: uppercase;
+    color: var(--gold);
+    text-align: center;
+    margin-bottom: 16px;
+  }
+
+  .section-title {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: clamp(32px, 5vw, 52px);
+    font-weight: 300;
+    text-align: center;
+    color: var(--navy);
+    line-height: 1.2;
+    margin-bottom: 16px;
+  }
+
+  .section-title em { font-style: italic; color: var(--sky-dark); }
+
+  .section-body {
+    font-size: 18px;
+    font-weight: 300;
+    text-align: center;
+    color: var(--text-muted);
+    max-width: 600px;
+    margin: 0 auto 60px;
+    line-height: 1.7;
+  }
+
+  .features-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 2px;
+    background: var(--cream-dark);
+    border: 1px solid var(--cream-dark);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+
+  .feature-card {
+    background: var(--cream);
+    padding: 40px 36px;
+    transition: background 0.2s;
+  }
+
+  .feature-card:hover { background: #fff; }
+
+  .feature-icon {
+    width: 44px;
+    height: 44px;
+    border-radius: 10px;
+    background: linear-gradient(135deg, var(--sky) 0%, var(--sky-dark) 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 20px;
+    font-size: 20px;
+  }
+
+  .feature-title {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 22px;
+    font-weight: 600;
+    color: var(--navy);
+    margin-bottom: 10px;
+  }
+
+  .feature-desc {
+    font-size: 16px;
+    font-weight: 300;
+    color: var(--text-muted);
+    line-height: 1.65;
+  }
+
+  /* SCRIPTURE BAND */
+  .scripture-band {
+    background: linear-gradient(135deg, var(--navy) 0%, var(--navy-light) 100%);
+    padding: 80px 24px;
+    text-align: center;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .scripture-band::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(ellipse at center, rgba(184,148,58,0.08) 0%, transparent 70%);
+  }
+
+  .scripture-text {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: clamp(22px, 4vw, 36px);
+    font-weight: 300;
+    font-style: italic;
+    color: rgba(255,255,255,0.9);
+    max-width: 700px;
+    margin: 0 auto 16px;
+    line-height: 1.5;
+    position: relative;
+    z-index: 1;
+  }
+
+  .scripture-ref {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 14px;
+    letter-spacing: 0.2em;
+    color: var(--gold-light);
+    position: relative;
+    z-index: 1;
+  }
+
+  /* LANGUAGES */
+  .languages-section {
+    background: var(--sky-light);
+    padding: 100px 24px;
+    text-align: center;
+  }
+
+  .languages-section .section-title { color: var(--navy); }
+
+  .languages-grid {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 10px;
+    max-width: 800px;
+    margin: 0 auto;
+  }
+
+  .lang-pill {
+    padding: 6px 16px;
+    background: rgba(255,255,255,0.6);
+    border-radius: 100px;
+    font-size: 14px;
+    font-weight: 300;
+    color: var(--navy);
+    border: 1px solid rgba(255,255,255,0.8);
+    backdrop-filter: blur(4px);
+  }
+
+  /* FOOTER */
+  footer {
+    background: var(--navy);
+    padding: 60px 24px 40px;
+    text-align: center;
+  }
+
+  .footer-logo {
+    width: 60px;
+    height: 60px;
+    border-radius: 12px;
+    object-fit: cover;
+    margin-bottom: 20px;
+    opacity: 0.9;
+  }
+
+  .footer-studio {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 13px;
+    letter-spacing: 0.3em;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.4);
+    margin-bottom: 8px;
+  }
+
+  .footer-name {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 22px;
+    font-weight: 300;
+    color: rgba(255,255,255,0.8);
+    margin-bottom: 32px;
+  }
+
+  .footer-links {
+    display: flex;
+    gap: 32px;
+    justify-content: center;
+    flex-wrap: wrap;
+    margin-bottom: 32px;
+  }
+
+  .footer-links a {
+    font-size: 14px;
+    font-weight: 300;
+    color: rgba(255,255,255,0.45);
+    text-decoration: none;
+    letter-spacing: 0.05em;
+    transition: color 0.2s;
+  }
+
+  .footer-links a:hover { color: var(--gold-light); }
+
+  .footer-copy {
+    font-size: 13px;
+    color: rgba(255,255,255,0.25);
+    font-weight: 300;
+  }
+
+  /* ANIMATIONS */
+  @keyframes floatIn {
+    from { opacity: 0; transform: translateY(24px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 0.4; transform: translateX(-50%) translateY(0); }
+    50%       { opacity: 0.8; transform: translateX(-50%) translateY(-4px); }
+  }
+
+  /* PLATFORM BADGE */
+  .platform-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 20px;
+    padding: 6px 14px;
+    background: rgba(255,255,255,0.12);
+    border-radius: 100px;
+    border: 1px solid rgba(255,255,255,0.2);
+    font-size: 12px;
+    letter-spacing: 0.1em;
+    color: rgba(255,255,255,0.6);
+    position: relative;
+    z-index: 1;
+    animation: floatIn 1.4s 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+</style>
 </head>
 <body>
 
-  <nav>
-    <a href="/" class="brand">
-      Graph&#x0113;
-      <span>SCRIPTURE STUDY PRO</span>
+<!-- HERO -->
+<section class="hero">
+  <img src="GrapheOneLogo.png" alt="Graphē One" class="hero-logo">
+  <div class="hero-badge">
+    <div class="studio-name">Studio Graphē One</div>
+    <div class="app-name"><em>Graphē</em> One</div>
+    <div class="app-subtitle">ScriptureStudy Pro</div>
+  </div>
+  <p class="hero-tagline">A beautifully crafted Bible study app for Mac. Read. Study. Explore — with hundreds of free resources in dozens of languages.</p>
+  <div class="hero-cta">
+    <a href="#" class="btn-primary">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a7 7 0 0 1 7 7c0 5.25-7 13-7 13S5 14.25 5 9a7 7 0 0 1 7-7z"/><circle cx="12" cy="9" r="2.5"/></svg>
+      Download on the Mac App Store
     </a>
-    <ul>
-      <li><a href="#features">Features</a></li>
-      <li><a href="support.html">Support</a></li>
-      <li><a href="privacy.html">Privacy</a></li>
-    </ul>
-  </nav>
+    <a href="support.html" class="btn-secondary">Support</a>
+  </div>
+  <div class="platform-badge">
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/></svg>
+    macOS 14 or later
+  </div>
+  <div class="scroll-hint">Scroll to explore</div>
+</section>
 
-  <section class="hero">
-    <div class="hero-icon">
-      <svg width="100" height="100" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
-        <circle cx="50" cy="50" r="48" fill="#a8c8e0"/>
-        <rect x="46.5" y="12" width="7" height="76" rx="2" fill="#c8a040" opacity="0.82"/>
-        <rect x="22" y="43" width="56" height="7" rx="2" fill="#c8a040" opacity="0.82"/>
-        <g transform="translate(43,46) rotate(-40)">
-          <path d="M0,-22 C3,-15 4,-6 3,2 C2,8 0,12 0,15 C0,12 -2,8 -3,2 C-4,-6 -3,-15 0,-22 Z" fill="#f5f0e8" opacity="0.97"/>
-          <line x1="0" y1="-22" x2="0" y2="15" stroke="#c8a040" stroke-width="0.8" opacity="0.7"/>
-          <path d="M0,15 C0.5,18 0.5,21 0,23 C0,21 -0.5,18 0,15 Z" fill="#8a7a50"/>
-        </g>
-      </svg>
+<!-- FEATURES -->
+<div style="background: var(--cream); padding: 60px 24px 0;">
+  <div class="gold-rule"></div>
+</div>
+
+<section class="section">
+  <div class="section-label">Features</div>
+  <h2 class="section-title">Everything you need,<br><em>working together seamlessly</em></h2>
+  <p class="section-body">Graphē is built around the conviction that good tools should get out of the way. Every feature connects naturally to the next.</p>
+
+  <div class="features-grid">
+    <div class="feature-card">
+      <div class="feature-icon">📖</div>
+      <div class="feature-title">Bible Reading</div>
+      <p class="feature-desc">Hundreds of translations in dozens of languages, with history navigation, verse bookmarks and customisable themes.</p>
     </div>
-    <h1>Graph&#x0113;</h1>
-    <p class="subtitle">Scripture Study Pro</p>
-    <p class="tagline">A serious Bible study app for Mac and iPhone. Read, study and explore Scripture with the depth it deserves.</p>
-    <a href="#" class="cta">Coming Soon to the App Store</a>
-    <p class="platforms">macOS · iOS · iCloud Sync</p>
-  </section>
-
-  <section class="features" id="features">
-    <h2>Everything you need for deeper study</h2>
-    <div class="feature-grid">
-      <div class="feature-card">
-        <div class="icon">📖</div>
-        <h3>MyBible Modules</h3>
-        <p>Supports the full MyBible .sqlite3 module library — hundreds of free Bible translations, commentaries, dictionaries and lexicons.</p>
-      </div>
-      <div class="feature-card">
-        <div class="icon">🔤</div>
-        <h3>Strong's Lexicons</h3>
-        <p>Tap any word to explore its original Greek or Hebrew meaning. Full Strong's concordance integration with interlinear support.</p>
-      </div>
-      <div class="feature-card">
-        <div class="icon">📚</div>
-        <h3>Commentaries & Dictionaries</h3>
-        <p>Read classic and contemporary commentaries alongside the text. Instant dictionary lookup keeps you in the flow of study.</p>
-      </div>
-      <div class="feature-card">
-        <div class="icon">✏️</div>
-        <h3>Notes & Organiser</h3>
-        <p>Take notes linked directly to verses. Organise bookmarks, highlights and reflections in one place.</p>
-      </div>
-      <div class="feature-card">
-        <div class="icon">💬</div>
-        <h3>AI Study Assistant</h3>
-        <p>Ask theological questions and get thoughtful, Scripture-grounded responses powered by a local or cloud AI engine.</p>
-      </div>
-      <div class="feature-card">
-        <div class="icon">🗂️</div>
-        <h3>Books & Archives</h3>
-        <p>Browse thousands of free classic Christian texts from Monergism, CCEL, Standard Ebooks and more — downloaded straight into your library.</p>
-      </div>
+    <div class="feature-card">
+      <div class="feature-icon">🗺</div>
+      <div class="feature-title">Bible Maps</div>
+      <p class="feature-desc">Interactive maps with hundreds of named locations. Tap a place name in the text and jump straight to the map.</p>
     </div>
-  </section>
-
-  <section class="about">
-    <h2>Built with care</h2>
-    <p>Graph&#x0113; is an independent app built by one person with a genuine love of Scripture and a desire to make serious Bible study accessible to everyone. The name comes from the Greek word used in 2 Timothy 3:16 — <em>&#x201C;All Scripture (graph&#x0113;) is God-breathed.&#x201D;</em></p>
-  </section>
-
-  <footer>
-    <div class="links">
-      <a href="support.html">Support</a>
-      <a href="privacy.html">Privacy Policy</a>
+    <div class="feature-card">
+      <div class="feature-icon">📜</div>
+      <div class="feature-title">Strong's Lexicon</div>
+      <p class="feature-desc">Tap any word to explore its original Greek or Hebrew meaning. Full interlinear support with morphology.</p>
     </div>
-    <p>&copy; 2026 Graph&#x0113; &middot; graphe.one &middot; All rights reserved</p>
-  </footer>
+    <div class="feature-card">
+      <div class="feature-icon">📝</div>
+      <div class="feature-title">Commentary</div>
+      <p class="feature-desc">Read classic commentaries alongside the text in the companion panel, synced to your current verse.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">🗒</div>
+      <div class="feature-title">Notes</div>
+      <p class="feature-desc">Create notes linked directly to verses. Organise, search, and export your study notes effortlessly.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">📄</div>
+      <div class="feature-title">PDF Books</div>
+      <p class="feature-desc">A beautifully designed PDF reader with full-text search, bookmarks, and annotation support.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">✨</div>
+      <div class="feature-title">AI Summaries</div>
+      <p class="feature-desc">AI-powered chapter summaries powered by your choice of Ollama or Anthropic. Entirely optional.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">🌍</div>
+      <div class="feature-title">Hundreds of Free Resources</div>
+      <p class="feature-desc">Bibles, commentaries, lexicons, devotionals and dictionaries — all free via the MyBible module library.</p>
+    </div>
+  </div>
+</section>
+
+<!-- SCRIPTURE BAND -->
+<div class="scripture-band">
+  <p class="scripture-text">"All Scripture is God-breathed and is useful for teaching, rebuking, correcting and training in righteousness."</p>
+  <p class="scripture-ref">2 Timothy 3:16 — γραφή (graphē)</p>
+</div>
+
+<!-- LANGUAGES -->
+<div class="languages-section">
+  <div class="section-label">Resources</div>
+  <h2 class="section-title" style="margin-bottom: 16px;">Hundreds of languages.<br><em>All free.</em></h2>
+  <p style="font-family: 'Crimson Pro', serif; font-size: 18px; font-weight: 300; color: var(--navy); opacity: 0.7; margin-bottom: 40px; text-align: center;">Download modules from mybible.zone and add them to your library in seconds.</p>
+  <div class="languages-grid">
+    <span class="lang-pill">English</span><span class="lang-pill">Greek</span><span class="lang-pill">Hebrew</span>
+    <span class="lang-pill">Latin</span><span class="lang-pill">Spanish</span><span class="lang-pill">French</span>
+    <span class="lang-pill">German</span><span class="lang-pill">Portuguese</span><span class="lang-pill">Russian</span>
+    <span class="lang-pill">Chinese</span><span class="lang-pill">Arabic</span><span class="lang-pill">Swahili</span>
+    <span class="lang-pill">Hindi</span><span class="lang-pill">Korean</span><span class="lang-pill">Japanese</span>
+    <span class="lang-pill">Dutch</span><span class="lang-pill">Italian</span><span class="lang-pill">Polish</span>
+    <span class="lang-pill">Romanian</span><span class="lang-pill">Ukrainian</span>
+    <span class="lang-pill">+ dozens more</span>
+  </div>
+</div>
+
+<!-- FOOTER -->
+<footer>
+  <img src="StudioGrapheOne_logo.png" alt="Studio Graphē One" class="footer-logo">
+  <div class="footer-studio">Made by</div>
+  <div class="footer-name">Studio Graphē One</div>
+  <div class="footer-links">
+    <a href="index.html">Home</a>
+    <a href="support.html">Support</a>
+    <a href="privacy.html">Privacy Policy</a>
+    <a href="mailto:support@graphe.one">Contact</a>
+  </div>
+  <div class="footer-copy">© 2026 Studio Graphē One. All rights reserved.</div>
+</footer>
 
 </body>
 </html>
