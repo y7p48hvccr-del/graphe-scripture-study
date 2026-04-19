@@ -85,10 +85,10 @@ struct InterlinearView: View {
         }
         .background(theme.background)
         .onAppear { loadVerses() }
-        .onChange(of: bookNumber)  { _ in selectedStrongs = ""; loadVerses() }
-        .onChange(of: chapter)     { _ in selectedStrongs = ""; loadVerses() }
-        .onChange(of: interlinearSvc.selectedOT) { _ in loadVerses() }
-        .onChange(of: interlinearSvc.selectedNT) { _ in loadVerses() }
+        .onChange(of: bookNumber)  { selectedStrongs = ""; loadVerses() }
+        .onChange(of: chapter)     { selectedStrongs = ""; loadVerses() }
+        .onChange(of: interlinearSvc.selectedOT) { loadVerses() }
+        .onChange(of: interlinearSvc.selectedNT) { loadVerses() }
     }
 
     // MARK: - Module bar
@@ -174,7 +174,7 @@ struct InterlinearView: View {
                     Spacer().frame(height: 20)
                 }
             }
-            .onChange(of: syncedVerse) { v in
+            .onChange(of: syncedVerse) { _, v in
                 if v > 0 { withAnimation { proxy.scrollTo(v, anchor: .center) } }
             }
         }

@@ -199,7 +199,7 @@ struct PDFReaderView: View {
             }
         }
         .onAppear { loadBookmarks(); restoreLastPage() }
-        .onChange(of: currentPage) { _ in saveLastPage() }
+        .onChange(of: currentPage) { saveLastPage() }
     }
 
     // MARK: - Navigation

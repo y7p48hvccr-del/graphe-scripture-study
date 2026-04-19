@@ -196,16 +196,21 @@ class MyBibleService: ObservableObject {
     @Published var hiddenModules:     Set<String>     = []   // file paths of hidden modules
     @Published var selectedBible:      MyBibleModule? { didSet { selectedBiblePath      = selectedBible?.filePath      ?? "" } }
     @Published var selectedStrongs:    MyBibleModule? { didSet { selectedStrongsPath    = selectedStrongs?.filePath    ?? "" } }
-    @Published var selectedDictionary:    MyBibleModule?
-    @Published var selectedEncyclopedia:  MyBibleModule?
-    @Published var selectedCrossRef:      MyBibleModule?
-    @Published var selectedDevotional:  MyBibleModule? { didSet { selectedDictionaryPath = selectedDictionary?.filePath ?? "" } }
+    @Published var selectedCommentary:    MyBibleModule? { didSet { selectedCommentaryPath  = selectedCommentary?.filePath  ?? "" } }
+    @Published var selectedDictionary:    MyBibleModule? { didSet { selectedDictionaryPath  = selectedDictionary?.filePath  ?? "" } }
+    @Published var selectedEncyclopedia:  MyBibleModule? { didSet { selectedEncyclopediaPath = selectedEncyclopedia?.filePath ?? "" } }
+    @Published var selectedCrossRef:      MyBibleModule? { didSet { selectedCrossRefPath     = selectedCrossRef?.filePath     ?? "" } }
+    @Published var selectedDevotional:    MyBibleModule? { didSet { selectedDevotionalPath   = selectedDevotional?.filePath   ?? "" } }
     @Published var rawVerseTexts:    [Int: String]    = [:]
 
     // Persisted selection paths
-    var selectedBiblePath:      String { get { UserDefaults.standard.string(forKey: "selectedBiblePath") ?? "" }      set { UserDefaults.standard.set(newValue, forKey: "selectedBiblePath") } }
-    var selectedStrongsPath:    String { get { UserDefaults.standard.string(forKey: "selectedStrongsPath") ?? "" }    set { UserDefaults.standard.set(newValue, forKey: "selectedStrongsPath") } }
-    var selectedDictionaryPath: String { get { UserDefaults.standard.string(forKey: "selectedDictionaryPath") ?? "" } set { UserDefaults.standard.set(newValue, forKey: "selectedDictionaryPath") } }
+    var selectedBiblePath:        String { get { UserDefaults.standard.string(forKey: "selectedBiblePath")        ?? "" } set { UserDefaults.standard.set(newValue, forKey: "selectedBiblePath") } }
+    var selectedStrongsPath:      String { get { UserDefaults.standard.string(forKey: "selectedStrongsPath")      ?? "" } set { UserDefaults.standard.set(newValue, forKey: "selectedStrongsPath") } }
+    var selectedDictionaryPath:   String { get { UserDefaults.standard.string(forKey: "selectedDictionaryPath")   ?? "" } set { UserDefaults.standard.set(newValue, forKey: "selectedDictionaryPath") } }
+    var selectedCommentaryPath:   String { get { UserDefaults.standard.string(forKey: "selectedCommentaryPath")   ?? "" } set { UserDefaults.standard.set(newValue, forKey: "selectedCommentaryPath") } }
+    var selectedEncyclopediaPath: String { get { UserDefaults.standard.string(forKey: "selectedEncyclopediaPath") ?? "" } set { UserDefaults.standard.set(newValue, forKey: "selectedEncyclopediaPath") } }
+    var selectedCrossRefPath:     String { get { UserDefaults.standard.string(forKey: "selectedCrossRefPath")     ?? "" } set { UserDefaults.standard.set(newValue, forKey: "selectedCrossRefPath") } }
+    var selectedDevotionalPath:   String { get { UserDefaults.standard.string(forKey: "selectedDevotionalPath")   ?? "" } set { UserDefaults.standard.set(newValue, forKey: "selectedDevotionalPath") } }
     @Published var verses:           [MyBibleVerse]  = []
     @Published var commentaryEntries:[CommentaryEntry] = []
     @Published var dictionaryEntries:[DictionaryEntry] = []
@@ -401,9 +406,12 @@ class MyBibleService: ObservableObject {
 
             // Use cache if file hasn't changed
             if let entry = cache.entries[path], entry.modDate == modDate {
+                // Sidecar can be added after a module was first cached; consult it
+                // here too so English names appear without forcing a re-scan.
+                let effectiveName = sidecarDisplayName(forModuleAt: path) ?? entry.name
                 found.append(MyBibleModule(
-                    name:        entry.name,
-                    description: entry.name,
+                    name:        effectiveName,
+                    description: effectiveName,
                     language:    entry.language,
                     type:        moduleTypeFromString(entry.type),
                     filePath:    path
@@ -452,9 +460,13 @@ class MyBibleService: ObservableObject {
         }
 
         // Restore saved selections, fall back to first available
-        let bPath = selectedBiblePath
-        let sPath = selectedStrongsPath
-        let dPath = selectedDictionaryPath
+        let bPath    = selectedBiblePath
+        let sPath    = selectedStrongsPath
+        let dPath    = selectedDictionaryPath
+        let cPath    = selectedCommentaryPath
+        let ePath    = selectedEncyclopediaPath
+        let xPath    = selectedCrossRefPath
+        let devPath  = selectedDevotionalPath
 
         if !bPath.isEmpty, let m = modules.first(where: { $0.filePath == bPath }) {
             selectedBible = m
@@ -466,20 +478,31 @@ class MyBibleService: ObservableObject {
         } else if selectedStrongs == nil {
             selectedStrongs = modules.first(where: { $0.type == .strongs })
         }
-        if selectedDevotional == nil {
-            selectedDevotional = modules.first(where: { $0.type == .devotional })
-        }
-        if selectedEncyclopedia == nil {
-            selectedEncyclopedia = modules.first(where: { $0.type == .encyclopedia })
-        }
-        if selectedCrossRef == nil {
-            selectedCrossRef = modules.first(where: { $0.type == .crossRefNative })
-                            ?? modules.first(where: { $0.type == .crossRef })
-        }
         if !dPath.isEmpty, let m = modules.first(where: { $0.filePath == dPath }) {
             selectedDictionary = m
         } else if selectedDictionary == nil {
             selectedDictionary = modules.first(where: { $0.type == .dictionary })
+        }
+        if !cPath.isEmpty, let m = modules.first(where: { $0.filePath == cPath }) {
+            selectedCommentary = m
+        } else if selectedCommentary == nil {
+            selectedCommentary = modules.first(where: { $0.type == .commentary })
+        }
+        if !ePath.isEmpty, let m = modules.first(where: { $0.filePath == ePath }) {
+            selectedEncyclopedia = m
+        } else if selectedEncyclopedia == nil {
+            selectedEncyclopedia = modules.first(where: { $0.type == .encyclopedia })
+        }
+        if !xPath.isEmpty, let m = modules.first(where: { $0.filePath == xPath }) {
+            selectedCrossRef = m
+        } else if selectedCrossRef == nil {
+            selectedCrossRef = modules.first(where: { $0.type == .crossRefNative })
+                            ?? modules.first(where: { $0.type == .crossRef })
+        }
+        if !devPath.isEmpty, let m = modules.first(where: { $0.filePath == devPath }) {
+            selectedDevotional = m
+        } else if selectedDevotional == nil {
+            selectedDevotional = modules.first(where: { $0.type == .devotional })
         }
 
         isLoading = false
@@ -554,7 +577,9 @@ class MyBibleService: ObservableObject {
         else if tables.contains("dictionary")      { type = .dictionary }
         else { type = .unknown }
 
-        let name = info["description"]
+        let sidecarName = sidecarDisplayName(forModuleAt: path)
+        let name = sidecarName
+            ?? info["description"]
             ?? info["name"]
             ?? URL(fileURLWithPath: path).deletingPathExtension().lastPathComponent
         let language = info["language"] ?? "en"
@@ -567,6 +592,56 @@ class MyBibleService: ObservableObject {
             filePath:    path
         )
         return (module, metaBlob, hasStrongNumbers)
+    }
+
+    /// Looks for a sidecar `_ModuleInfo/<base>.txt` file created by `module_info.py`
+    /// and returns the English display name from its `Name:` field, if present.
+    /// Returns `nil` when the file is missing, unreadable, or has no `Name:` line —
+    /// caller then falls back to the native-language info table values.
+    ///
+    /// Layout assumed:
+    ///   <modulesRoot>/Bibles/MyBook.bibles.graphe         ← module
+    ///   <modulesRoot>/_ModuleInfo/MyBook.txt              ← sidecar
+    nonisolated private func sidecarDisplayName(forModuleAt path: String) -> String? {
+        let url = URL(fileURLWithPath: path)
+
+        // Derive base name by stripping ".graphe" and any secondary type extension
+        // (".bibles", ".commentaries", etc.) so "MyBook.bibles.graphe" → "MyBook".
+        var base = url.deletingPathExtension().lastPathComponent
+        let typeExts = ["bibles", "commentaries", "dictionaries",
+                        "crossreferences", "cross_references",
+                        "devotions", "subheadings", "words",
+                        "reading_plan", "readingplan"]
+        for ext in typeExts {
+            let suffix = "." + ext
+            if base.lowercased().hasSuffix(suffix.lowercased()) {
+                base = String(base.dropLast(suffix.count))
+                break
+            }
+        }
+
+        // _ModuleInfo lives as a sibling of the Bibles/Commentaries/... subfolders,
+        // i.e. two levels above the module file.
+        let root     = url.deletingLastPathComponent().deletingLastPathComponent()
+        let sidecar  = root.appendingPathComponent("_ModuleInfo")
+                           .appendingPathComponent("\(base).txt")
+
+        guard let contents = try? String(contentsOf: sidecar, encoding: .utf8) else {
+            return nil
+        }
+
+        // Parse the first line that starts with "Name:".
+        // The .txt files have other Name-adjacent keys (File, Original, Path, Type)
+        // above the divider — those don't start with "Name:" so the match is unambiguous.
+        for rawLine in contents.components(separatedBy: .newlines) {
+            let line = rawLine.trimmingCharacters(in: .whitespaces)
+            if line.hasPrefix("Name:") {
+                let value = String(line.dropFirst("Name:".count))
+                    .trimmingCharacters(in: .whitespaces)
+                if !value.isEmpty { return value }
+            }
+        }
+        return nil
     }
 
     nonisolated private func getTableNames(db: OpaquePointer?) -> [String] {

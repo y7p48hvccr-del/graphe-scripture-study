@@ -15,7 +15,7 @@ class HelpWindowController: NSWindowController {
             backing:     .buffered,
             defer:       false
         )
-        window.title          = "ScriptureStudy Help"
+        window.title          = "Graphē One Help"
         window.minSize        = NSSize(width: 700, height: 500)
         window.isReleasedWhenClosed = false
         window.center()
@@ -113,7 +113,7 @@ struct HelpView: View {
                     // Normal page list
                     ScrollView {
                         VStack(alignment: .leading, spacing: 0) {
-                            Text("📖 ScriptureStudy")
+                            Text("Graphē One ScriptureStudy Pro")
                                 .font(.headline)
                                 .padding(.horizontal, 16).padding(.vertical, 14)
 

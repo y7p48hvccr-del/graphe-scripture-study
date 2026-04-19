@@ -14,17 +14,29 @@ struct ScriptureStudyApp: App {
     @StateObject private var notesManager      = NotesManager()
     @StateObject private var bookmarksManager  = BookmarksManager()
     @StateObject private var calendarStore     = CalendarEventStore()
-    @State private var launchDone: Bool = false
+    @State private var launchDone:    Bool = false
+    @State private var readyToShow:   Bool = false
+    @AppStorage("hasSeenOnboarding")  private var hasSeenOnboarding:  Bool = false
+    @AppStorage("showOnboardingAgain") private var showOnboardingAgain: Bool = true
 
     @AppStorage("themeID") private var themeID = "light"
 
     var body: some Scene {
         WindowGroup(id: "main") {
             ZStack {
-                ContentView()
+                // Only render ContentView once launch splash is fully done
+                if readyToShow {
+                    ContentView()
+                }
+                // Launch splash — shows first, then optionally onboarding
                 if !launchDone {
-                    LaunchScreenView { withAnimation { launchDone = true } }
-                        .zIndex(99)
+                    LaunchScreenView {
+                        withAnimation { launchDone = true }
+                        // Show onboarding after splash if needed
+                        // ContentView handles onboarding internally
+                        readyToShow = true
+                    }
+                    .zIndex(99)
                 }
             }
                 .environmentObject(bibleService)

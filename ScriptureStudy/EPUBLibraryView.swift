@@ -46,6 +46,7 @@ final class CoverStore: ObservableObject {
 }
 
 
+@MainActor
 struct EPUBLibraryView: View {
     @AppStorage("epubFolder")           private var epubFolder:       String = ""
     @AppStorage("epubFolderBookmark")   private var epubFolderBookmarkData: Data = Data()
@@ -78,7 +79,7 @@ struct EPUBLibraryView: View {
     @AppStorage("epubSortOrder")  private var sortOrder:      String = "title"
     @AppStorage("epubLastOpened")  private var lastOpenedData:  Data   = Data()
     @State private var allEpubBookmarks: [(book: BookFile, bookmark: EPUBBookmark)] = []
-    @State private var formatFilter: String = "all"  // "all", "epub", "pdf"
+    @State private var formatFilter: String = "all"
 
     var sortedBooks: [BookFile] {
         switch sortOrder {
@@ -163,11 +164,31 @@ struct EPUBLibraryView: View {
                                        initialScrollY: selectedInitialScrollY)
                     }
                 }
-                .toolbar {
-                    ToolbarItem(placement: .navigation) {
-                        Button { selectedURL = nil; selectedFormat = nil; selectedInitialHref = nil; selectedSearchQuery = nil; selectedInitialScrollY = 0 } label: {
+                .safeAreaInset(edge: .top, spacing: 0) {
+                    HStack(spacing: 6) {
+                        Button {
+                            selectedURL            = nil
+                            selectedFormat         = nil
+                            selectedInitialHref    = nil
+                            selectedSearchQuery    = nil
+                            selectedInitialScrollY = 0
+                        } label: {
                             Label("Archives", systemImage: "chevron.left")
+                                .labelStyle(.titleAndIcon)
+                                .font(.system(size: 13, weight: .medium))
                         }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(filigreeAccent)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .contentShape(Rectangle())
+                        Spacer()
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(.bar)
+                    .overlay(alignment: .bottom) {
+                        Divider()
                     }
                 }
             } else {
@@ -340,10 +361,12 @@ struct EPUBLibraryView: View {
                 List {
                     ForEach(bookSearch.results) { result in
                         Button {
-                            selectedInitialHref  = result.href
-                            selectedSearchQuery  = bookSearch.lastQuery
-                            selectedURL    = result.bookURL
-                            selectedFormat = .epub
+                            selectedInitialHref    = result.href
+                            selectedSearchQuery    = bookSearch.lastQuery
+                            selectedInitialScrollY = 0
+                            selectedURL            = result.bookURL
+                            selectedFormat         = .epub
+                            recordOpened(result.bookURL)
                         } label: {
                             VStack(alignment: .leading, spacing: 4) {
                                 HStack {
@@ -382,14 +405,11 @@ struct EPUBLibraryView: View {
                                 .onAppear { coverStore.loadCover(for: book.url) }
                             Button { bookToDelete = book } label: {
                                 Image(systemName: "trash")
-                                    .font(.system(size: 11))
-                                    .foregroundStyle(.white)
-                                    .padding(5)
-                                    .background(Color.red.opacity(0.7))
-                                    .clipShape(RoundedRectangle(cornerRadius: 5))
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(.red.opacity(0.7))
                             }
                             .buttonStyle(.plain)
-                            .padding(.trailing, 10)
+                            .padding(.horizontal, 8)
                             .help("Delete this book")
                         }
                         Divider().padding(.leading, 56)
@@ -425,7 +445,7 @@ struct EPUBLibraryView: View {
                         }
                         .padding(.bottom, 20)
                     }
-                    .onChange(of: searchText) { _ in
+                    .onChange(of: searchText) {
                         if let first = booksByLetter.first {
                             proxy.scrollTo("letter_\(first.letter)", anchor: .top)
                         }
@@ -552,7 +572,9 @@ struct EPUBLibraryView: View {
                     ("epub", "EPUB",        "\(epubCount)", "book"),
                     ("pdf",  "PDF",         "\(pdfCount)",  "doc.richtext"),
                 ], id: \.0) { filter, label, count, icon in
-                    Button { formatFilter = filter } label: {
+                    Button {
+                        formatFilter = filter
+                    } label: {
                         HStack(spacing: 8) {
                             // Radio indicator
                             Circle()
@@ -667,9 +689,11 @@ struct EPUBLibraryView: View {
 
                                 Button {
                                     selectedInitialHref    = bm.href
+                                    selectedSearchQuery    = nil
                                     selectedInitialScrollY = bm.scrollY
                                     selectedURL            = book.url
                                     selectedFormat         = .epub
+                                    recordOpened(book.url)
                                 } label: {
                                     VStack(alignment: .leading, spacing: 2) {
                                         Text(bookTitle)
@@ -763,6 +787,7 @@ struct EPUBLibraryView: View {
         recordOpened(book.url)
         selectedInitialHref = nil
         selectedSearchQuery = nil
+
         if book.format.isReadable {
             selectedURL    = book.url
             selectedFormat = book.format
@@ -894,7 +919,9 @@ struct EPUBLibraryView: View {
             loadAllBookmarks()
         }
     }
+}
 
+extension EPUBLibraryView {
     /// Scan for epub, azw3, mobi files and deduplicate by base title,
     /// preferring epub > azw3 > mobi when multiple formats of the same book exist.
     nonisolated static func findBooks(in dir: URL) -> [BookFile] {

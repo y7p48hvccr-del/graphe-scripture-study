@@ -124,12 +124,12 @@ struct ComparisonPanelView: View {
                         .padding(.vertical, 8)
                     }
                     .background(Color.white)
-                    .onChange(of: syncedVerse) { v in
+                    .onChange(of: syncedVerse) { _, v in
                         if v > 0 {
                             withAnimation { proxy.scrollTo(v, anchor: .center) }
                         }
                     }
-                    .onChange(of: verses) { _ in
+                    .onChange(of: verses) {
                         if syncedVerse > 0 {
                             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                                 withAnimation { proxy.scrollTo(syncedVerse, anchor: .center) }
@@ -140,13 +140,13 @@ struct ComparisonPanelView: View {
             }
         }
         .background(theme.background)
-        .onChange(of: comparisonModule) { _ in
+        .onChange(of: comparisonModule) {
             Task { await loadVerses() }
         }
-        .onChange(of: bookNumber) { _ in
+        .onChange(of: bookNumber) {
             Task { await loadVerses() }
         }
-        .onChange(of: chapter) { _ in
+        .onChange(of: chapter) {
             Task { await loadVerses() }
         }
         .onAppear {

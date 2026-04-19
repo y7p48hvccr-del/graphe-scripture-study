@@ -135,9 +135,9 @@ struct ChatView: View {
                     }
                     .padding(.vertical)
                 }
-                .onChange(of: messages.count)          { _ in withAnimation { proxy.scrollTo("bottom") } }
-                .onChange(of: ollama.isLoading)        { _ in withAnimation { proxy.scrollTo("bottom") } }
-                .onChange(of: ollama.chapterSummary)   { _ in withAnimation { proxy.scrollTo("bottom") } }
+                .onChange(of: messages.count)          { withAnimation { proxy.scrollTo("bottom") } }
+                .onChange(of: ollama.isLoading)        { withAnimation { proxy.scrollTo("bottom") } }
+                .onChange(of: ollama.chapterSummary)   { withAnimation { proxy.scrollTo("bottom") } }
             }
         }
         }  // ZStack

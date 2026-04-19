@@ -5,6 +5,7 @@ import Foundation
 enum VerseSegment {
     case text(String)
     case word(String, strongsNumber: String)
+    case footnote(marker: String, content: String)
 }
 
 // MARK: - Strong's Parser
@@ -12,7 +13,7 @@ enum VerseSegment {
 struct StrongsParser {
 
     static func parse(_ input: String) -> [VerseSegment] {
-        // Strip <n>...</n> gloss notes before parsing — content shown via popover instead
+        // Strip <n>...</n> gloss notes before parsing
         var cleaned = input
         while let o = cleaned.range(of: "<n>"),
               let c = cleaned.range(of: "</n>", range: o.lowerBound..<cleaned.endIndex) {
@@ -23,18 +24,68 @@ struct StrongsParser {
         } else if cleaned.contains("<WG>") || cleaned.contains("<WH>") || cleaned.contains("<W>") {
             return parsePrefixFormat(cleaned)
         } else {
-            return [.text(stripAllTags(cleaned))]
+            return parsePlainWithFootnotes(cleaned)
         }
     }
 
+    // MARK: - Plain text with footnote extraction
+
+    static func parsePlainWithFootnotes(_ input: String) -> [VerseSegment] {
+        var segments: [VerseSegment] = []
+        var remaining = input
+        var footnoteIndex = 0
+        let markers = ["ᵃ","ᵇ","ᶜ","ᵈ","ᵉ","ᶠ","ᵍ","ʰ","ⁱ","ʲ"]
+
+        while !remaining.isEmpty {
+            guard let fOpen = remaining.range(of: "<f>"),
+                  let fClose = remaining.range(of: "</f>",
+                      range: fOpen.lowerBound..<remaining.endIndex) else {
+                // No more footnotes — append remaining as plain text
+                let plain = stripAllTags(remaining)
+                if !plain.isEmpty { segments.append(.text(plain)) }
+                break
+            }
+
+            // Text before this footnote
+            let before = String(remaining[remaining.startIndex..<fOpen.lowerBound])
+            let plain  = stripAllTags(before)
+            if !plain.isEmpty { segments.append(.text(plain)) }
+
+            // Footnote content
+            let content = String(remaining[fOpen.upperBound..<fClose.lowerBound])
+            let marker  = footnoteIndex < markers.count ? markers[footnoteIndex] : "†"
+            footnoteIndex += 1
+            segments.append(.footnote(marker: marker, content: stripAllTags(content)))
+
+            remaining = String(remaining[fClose.upperBound...])
+        }
+
+        return segments
+    }
+
     // MARK: - Postfix format: word<S>1234</S>
-    // Some words have no translation (e.g. Hebrew את H853) and appear as <S>853</S>
-    // with only whitespace before them — these must be silently discarded.
 
     private static func parsePostfixFormat(_ input: String) -> [VerseSegment] {
-        // Pre-normalise: strip formatting tags (<J>, <i>, <t>, ¶) but keep their text content
-        // so that word<J>text</J><S>num</S> becomes wordtext<S>num</S>
-        var normalised = input
+        // First extract footnotes, preserving their positions
+        var footnoteMap: [String: String] = [:]
+        var footnoteIndex = 0
+        let markerList = ["ᵃ","ᵇ","ᶜ","ᵈ","ᵉ","ᶠ","ᵍ","ʰ","ⁱ","ʲ"]
+        var preprocessed = input
+
+        while let fOpen = preprocessed.range(of: "<f>"),
+              let fClose = preprocessed.range(of: "</f>",
+                  range: fOpen.lowerBound..<preprocessed.endIndex) {
+            let content = String(preprocessed[fOpen.upperBound..<fClose.lowerBound])
+            let marker  = footnoteIndex < markerList.count ? markerList[footnoteIndex] : "†"
+            footnoteIndex += 1
+            let placeholder = "⟨FN:\(marker)⟩"
+            footnoteMap[placeholder] = content
+            preprocessed.replaceSubrange(fOpen.lowerBound..<fClose.upperBound,
+                                         with: " \(placeholder) ")
+        }
+
+        // Now parse Strong's as before
+        var normalised = preprocessed
         for tag in ["J", "i", "t"] {
             normalised = normalised.replacingOccurrences(of: "<\(tag)>",  with: "")
             normalised = normalised.replacingOccurrences(of: "</\(tag)>", with: "")
@@ -47,20 +98,20 @@ struct StrongsParser {
 
         while !remaining.isEmpty {
             guard let sOpen = remaining.range(of: "<S>") else {
-                let clean = stripAllTags(String(remaining))
+                let clean = stripAllTagsAndExpandFootnotes(String(remaining),
+                                                           footnoteMap: footnoteMap,
+                                                           segments: &segments)
                 if !clean.isEmpty { segments.append(.text(clean)) }
                 break
             }
 
-            // Text before this <S> tag
             let before = String(remaining[remaining.startIndex..<sOpen.lowerBound])
             let (plainPart, lastWord) = splitLastWord(before)
 
-            // Append plain text portion
-            let cleanPlain = stripAllTags(plainPart)
-            if !cleanPlain.isEmpty { segments.append(.text(cleanPlain)) }
+            expandFootnotesInText(stripAllTags(plainPart),
+                                  footnoteMap: footnoteMap,
+                                  segments: &segments)
 
-            // Consume this and any immediately following <S> tags
             remaining = remaining[sOpen.upperBound...]
             var strongsKeys: [String] = []
 
@@ -70,7 +121,6 @@ struct StrongsParser {
                 remaining = remaining[sClose.upperBound...]
                 strongsKeys.append(normaliseKey(raw))
 
-                // Consume additional consecutive <S> tags
                 while remaining.hasPrefix("<S>") {
                     let nextOpen = remaining.range(of: "<S>")!
                     remaining = remaining[nextOpen.upperBound...]
@@ -85,44 +135,37 @@ struct StrongsParser {
             let strongsKey = strongsKeys.first ?? ""
 
             if !lastWord.isEmpty && !strongsKey.isEmpty {
-                // Normal case: word with Strong's number
                 segments.append(.word(lastWord, strongsNumber: strongsKey))
             } else if !lastWord.isEmpty {
-                // Word with no usable Strong's number — treat as plain text
                 segments.append(.text(lastWord))
             }
-            // If lastWord is empty: standalone Strong's tag (untranslated particle) — silently discard
         }
 
         return mergeAdjacentText(segments)
     }
 
-    // MARK: - Split "In the beginning" → ("In the ", "beginning")
-
-    private static func splitLastWord(_ text: String) -> (String, String) {
-        var i = text.endIndex
-        // Skip trailing whitespace
-        while i > text.startIndex {
-            let prev = text.index(before: i)
-            if !text[prev].isWhitespace { break }
-            i = prev
-        }
-        let wordEnd = i
-        // Walk back to find word start
-        while i > text.startIndex {
-            let prev = text.index(before: i)
-            if text[prev].isWhitespace || text[prev] == ">" { break }
-            i = prev
-        }
-        let lastWord = stripAllTags(String(text[i..<wordEnd]))
-        let prefix   = String(text[text.startIndex..<i])
-        return (prefix, lastWord)
-    }
-
     // MARK: - Prefix format: <WG>1234</WG>word
 
     private static func parsePrefixFormat(_ input: String) -> [VerseSegment] {
-        var text = input
+        // Extract footnotes first
+        var footnoteMap: [String: String] = [:]
+        var footnoteIndex = 0
+        let markerList = ["ᵃ","ᵇ","ᶜ","ᵈ","ᵉ","ᶠ","ᵍ","ʰ","ⁱ","ʲ"]
+        var preprocessed = input
+
+        while let fOpen = preprocessed.range(of: "<f>"),
+              let fClose = preprocessed.range(of: "</f>",
+                  range: fOpen.lowerBound..<preprocessed.endIndex) {
+            let content = String(preprocessed[fOpen.upperBound..<fClose.lowerBound])
+            let marker  = footnoteIndex < markerList.count ? markerList[footnoteIndex] : "†"
+            footnoteIndex += 1
+            let placeholder = "⟨FN:\(marker)⟩"
+            footnoteMap[placeholder] = content
+            preprocessed.replaceSubrange(fOpen.lowerBound..<fClose.upperBound,
+                                         with: " \(placeholder) ")
+        }
+
+        var text = preprocessed
         text = replaceTagged(text, open: "<W>G", close: "</W>", newOpen: "<WG>", newClose: "</WG>")
         text = replaceTagged(text, open: "<W>H", close: "</W>", newOpen: "<WH>", newClose: "</WH>")
         text = text.replacingOccurrences(of: "<WT>",  with: "")
@@ -147,22 +190,25 @@ struct StrongsParser {
             }
 
             guard let found = tagRange else {
-                let clean = stripAllTags(String(remaining))
-                if !clean.isEmpty { segments.append(.text(clean)) }
+                expandFootnotesInText(stripAllTags(String(remaining)),
+                                      footnoteMap: footnoteMap,
+                                      segments: &segments)
                 break
             }
 
             let before = String(remaining[remaining.startIndex..<found.lowerBound])
-            let clean  = stripAllTags(before)
-            if !clean.isEmpty { segments.append(.text(clean)) }
+            expandFootnotesInText(stripAllTags(before),
+                                  footnoteMap: footnoteMap,
+                                  segments: &segments)
 
             let closeTag = isGreek ? "</WG>" : "</WH>"
             let prefix   = isGreek ? "G" : "H"
             remaining    = remaining[found.upperBound...]
 
             guard let closeRange = remaining.range(of: closeTag) else {
-                let rest = stripAllTags(String(remaining))
-                if !rest.isEmpty { segments.append(.text(rest)) }
+                expandFootnotesInText(stripAllTags(String(remaining)),
+                                      footnoteMap: footnoteMap,
+                                      segments: &segments)
                 break
             }
 
@@ -174,10 +220,74 @@ struct StrongsParser {
             if !word.isEmpty {
                 segments.append(.word(word, strongsNumber: strongsKey))
             }
-            // If no following word, silently discard (untranslated particle)
         }
 
         return mergeAdjacentText(segments)
+    }
+
+    // MARK: - Footnote expansion helpers
+
+    private static func expandFootnotesInText(_ text: String,
+                                               footnoteMap: [String: String],
+                                               segments: inout [VerseSegment]) {
+        guard !footnoteMap.isEmpty else {
+            if !text.isEmpty { segments.append(.text(text)) }
+            return
+        }
+        var remaining = text
+        while !remaining.isEmpty {
+            var foundPlaceholder: String? = nil
+            var foundRange: Range<String.Index>? = nil
+            for placeholder in footnoteMap.keys {
+                if let r = remaining.range(of: placeholder) {
+                    if foundRange == nil || r.lowerBound < foundRange!.lowerBound {
+                        foundPlaceholder = placeholder
+                        foundRange = r
+                    }
+                }
+            }
+            guard let ph = foundPlaceholder, let r = foundRange else {
+                if !remaining.isEmpty { segments.append(.text(remaining)) }
+                break
+            }
+            let before = String(remaining[remaining.startIndex..<r.lowerBound])
+            if !before.trimmingCharacters(in: .whitespaces).isEmpty {
+                segments.append(.text(before))
+            }
+            let marker  = String(ph.dropFirst(5).dropLast(1)) // ⟨FN:X⟩ → X
+            let content = footnoteMap[ph] ?? ""
+            segments.append(.footnote(marker: marker, content: stripAllTags(content)))
+            remaining = String(remaining[r.upperBound...])
+        }
+    }
+
+    @discardableResult
+    private static func stripAllTagsAndExpandFootnotes(_ text: String,
+                                                        footnoteMap: [String: String],
+                                                        segments: inout [VerseSegment]) -> String {
+        let stripped = stripAllTags(text)
+        expandFootnotesInText(stripped, footnoteMap: footnoteMap, segments: &segments)
+        return ""
+    }
+
+    // MARK: - Split "In the beginning" → ("In the ", "beginning")
+
+    private static func splitLastWord(_ text: String) -> (String, String) {
+        var i = text.endIndex
+        while i > text.startIndex {
+            let prev = text.index(before: i)
+            if !text[prev].isWhitespace { break }
+            i = prev
+        }
+        let wordEnd = i
+        while i > text.startIndex {
+            let prev = text.index(before: i)
+            if text[prev].isWhitespace || text[prev] == ">" { break }
+            i = prev
+        }
+        let lastWord = stripAllTags(String(text[i..<wordEnd]))
+        let prefix   = String(text[text.startIndex..<i])
+        return (prefix, lastWord)
     }
 
     private static func extractNextWord(_ remaining: inout Substring) -> String {
@@ -190,13 +300,9 @@ struct StrongsParser {
         return word.trimmingCharacters(in: .whitespaces)
     }
 
-    // MARK: - Normalise key: "430" stays as-is, "G1234" stays as-is
-
     private static func normaliseKey(_ raw: String) -> String {
         raw.trimmingCharacters(in: .whitespaces)
     }
-
-    // MARK: - Tag replacement
 
     private static func replaceTagged(
         _ input: String, open: String, close: String,
@@ -206,25 +312,22 @@ struct StrongsParser {
         while let s = result.range(of: open),
               let e = result.range(of: close, range: s.upperBound..<result.endIndex) {
             let inner = String(result[s.upperBound..<e.lowerBound])
-            result.replaceSubrange(s.lowerBound..<e.upperBound, with: newOpen + inner + newClose)
+            result.replaceSubrange(s.lowerBound..<e.upperBound,
+                                   with: newOpen + inner + newClose)
         }
         return result
     }
 
-    // MARK: - Strip all HTML/markup tags
-
     static func stripAllTags(_ input: String) -> String {
         var result = input
-
-        // Replace page break markers with a space to prevent words merging
-        // e.g. "Isaac,<pb/>Jacob" → "Isaac, Jacob" not "Isaac,Jacob"
         result = result.replacingOccurrences(of: "<pb/>", with: " ")
         result = result.replacingOccurrences(of: "<pb>",  with: " ")
 
-        // Strip <f>...</f> footnote markers AND their content entirely
-        // (circled letters ⓐ, ⓑ and numbered refs [1] are footnote symbols, not verse text)
+        // Strip footnote placeholders (already extracted above)
+        // Strip <f>...</f> that weren't caught (safety net — drop content)
         while let open  = result.range(of: "<f>"),
-              let close = result.range(of: "</f>", range: open.lowerBound..<result.endIndex) {
+              let close = result.range(of: "</f>",
+                  range: open.lowerBound..<result.endIndex) {
             result.removeSubrange(open.lowerBound..<close.upperBound)
         }
 
@@ -234,15 +337,11 @@ struct StrongsParser {
             result.removeSubrange(s.lowerBound...e.lowerBound)
         }
 
-        // Clean up double spaces left by removed markers
         while result.contains("  ") {
             result = result.replacingOccurrences(of: "  ", with: " ")
         }
-
         return result.trimmingCharacters(in: .whitespacesAndNewlines)
     }
-
-    // MARK: - Merge adjacent text segments
 
     private static func mergeAdjacentText(_ segments: [VerseSegment]) -> [VerseSegment] {
         var result: [VerseSegment] = []

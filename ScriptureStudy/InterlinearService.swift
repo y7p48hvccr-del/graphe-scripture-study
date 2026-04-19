@@ -45,9 +45,24 @@ class InterlinearService: ObservableObject {
 
     func loadIfNeeded() {
         guard !isLoaded else { return }
-        guard let folder = UserDefaults.standard.string(forKey: "modulesFolder"),
-              !folder.isEmpty else { return }
-        scan(in: URL(fileURLWithPath: folder))
+        print("[InterlinearService] loadIfNeeded called")
+        guard let folder = ModulesFolderBookmark.resolve() else {
+            print("[InterlinearService] bookmark resolve failed, trying plain path")
+            guard let path = UserDefaults.standard.string(forKey: "modulesFolder"),
+                  !path.isEmpty else {
+                print("[InterlinearService] no modules folder set")
+                return
+            }
+            scan(in: URL(fileURLWithPath: path))
+            return
+        }
+        print("[InterlinearService] resolved folder: \(folder.path)")
+        guard folder.startAccessingSecurityScopedResource() else {
+            print("[InterlinearService] failed to access security scope")
+            return
+        }
+        scan(in: folder)
+        folder.stopAccessingSecurityScopedResource()
     }
 
     func fetchVerses(module: InterlinearModule, bookNumber: Int, chapter: Int) async -> [InterlinearVerse] {
@@ -71,7 +86,7 @@ class InterlinearService: ObservableObject {
             // Collect URLs synchronously before entering async context
             let allURLs = enumerator.compactMap { $0 as? URL }
             let sqliteURLs = allURLs.filter {
-                ["sqlite3","sqlite","db"].contains($0.pathExtension.lowercased())
+                ["sqlite3","sqlite","db","graphe"].contains($0.pathExtension.lowercased())
             }
             var found: [InterlinearModule] = []
             for url in sqliteURLs {
@@ -146,66 +161,243 @@ class InterlinearService: ObservableObject {
         defer { sqlite3_finalize(stmt) }
 
         var result: [InterlinearVerse] = []
+        let isGraphe = dbPath.hasSuffix(".graphe")
         while sqlite3_step(stmt) == SQLITE_ROW {
             let verseNum = Int(sqlite3_column_int(stmt, 0))
-            let text     = sqlite3_column_text(stmt, 1).map { String(cString: $0) } ?? ""
-            let tokens   = isRTL ? parseOT(text, prefix: prefix) : parseNT(text, prefix: prefix)
+            let text: String
+            if isGraphe,
+               let ptr = sqlite3_column_blob(stmt, 1) {
+                let len = sqlite3_column_bytes(stmt, 1)
+                text = grapheDecrypt(ptr.assumingMemoryBound(to: UInt8.self), len, filePath: dbPath)
+                    ?? sqlite3_column_text(stmt, 1).map { String(cString: $0) }
+                    ?? ""
+            } else {
+                text = sqlite3_column_text(stmt, 1).map { String(cString: $0) } ?? ""
+            }
+            let tokens = isRTL ? parseOT(text, prefix: prefix) : parseNT(text, prefix: prefix)
             result.append(InterlinearVerse(verse: verseNum, tokens: tokens))
         }
         return result
     }
 
-    // MARK: - NT parser (iESVTH format)
-    // English_words <n>Greek</n><S>number</S><m>morphology</m>
+    // MARK: - Unified interlinear parser
+    //
+    // Handles all observed module formats by anchoring on <S>NNNN</S>
+    // (the Strong's number tag that every token has). Extracts morphology
+    // first into a position-indexed map, then walks each <S> boundary to
+    // identify the original-language word and its translation.
+    //
+    // Formats handled:
+    //   A. iESVTH   : English <n>Greek</n><S>n</S><m>morph</m>
+    //   B. Spanish  : Greek <S>n</S> <m>morph</m> <n>Translation</n>
+    //   C. VIN-el   : Greek <n>Translation</n><S>n</S><m>morph</m>
+    //   D. BHPk/GNTTH : Greek<S>n</S><m>morph</m>           (no translation)
+    //   E. HSB+     : <e>Hebrew</e> <S>n</S> <n>translit</n> English
+    //   F. HSB2+    : Hebrew <S>n</S> <n>English</n>
+    //   G. IHOT+    : Hebrew <S>n</S>English
+    //   H. Ana+     : Hebrew <S>n</S><m>morph</m> <n><e>Russian</e></n>
 
-    private nonisolated static func parseNT(_ text: String, prefix: String) -> [InterlinearToken] {
-        var tokens: [InterlinearToken] = []
-        // Regex: optional english before <n>, greek inside <n>, S number, optional m morph
-        let pattern = try! NSRegularExpression(
-            pattern: #"([^<]*?)<n>([^<]*)</n><S>(\d+)</S>(?:<m>([^<]*)</m>)?"#)
-        let ns = text as NSString
-        let matches = pattern.matches(in: text, range: NSRange(location: 0, length: ns.length))
-        for m in matches {
-            func sub(_ i: Int) -> String {
-                m.range(at: i).location != NSNotFound
-                    ? ns.substring(with: m.range(at: i)).trimmingCharacters(in: .whitespacesAndNewlines)
-                    : ""
+    private nonisolated static func parseInterlinear(_ text: String, prefix: String, isRTL: Bool) -> [InterlinearToken] {
+        // Step 0: locate every <m>...</m> with its byte position in the
+        // original text, and associate it with the nearest <S>.
+        let mRe = try! NSRegularExpression(pattern: #"<m>([^<]*)</m>"#)
+        let sRe = try! NSRegularExpression(pattern: #"<S>(\d+)</S>"#)
+        let ns  = text as NSString
+        let textRange = NSRange(location: 0, length: ns.length)
+
+        let mMatches = mRe.matches(in: text, range: textRange)
+        let sMatches = sRe.matches(in: text, range: textRange)
+
+        // Map each <S> to the morphology tag closest to it (in char distance).
+        var morphByS: [Int: String] = [:]
+        for mm in mMatches {
+            let mPos   = mm.range.location
+            let mEnd   = mPos + mm.range.length
+            let morph  = ns.substring(with: mm.range(at: 1))
+                          .trimmingCharacters(in: .whitespacesAndNewlines)
+            // Find nearest <S> — the closest one in either direction wins.
+            var bestIdx  = -1
+            var bestDist = Int.max
+            for (idx, sm) in sMatches.enumerated() {
+                let sPos = sm.range.location
+                let sEnd = sPos + sm.range.length
+                let dist = (sPos >= mEnd) ? (sPos - mEnd) : (mPos - sEnd)
+                if dist < bestDist {
+                    bestDist = dist
+                    bestIdx  = idx
+                }
             }
-            let eng   = sub(1).trimmingCharacters(in: CharacterSet(charactersIn: "\u{201C}\u{201D}\""))
-            let greek = sub(2)
-            let snum  = prefix + sub(3)
-            let morph = sub(4)
-            guard !greek.isEmpty else { continue }
-            tokens.append(InterlinearToken(english: eng, original: greek,
-                                            strongsNum: snum, morphology: morph))
+            if bestIdx >= 0 && morphByS[bestIdx] == nil {
+                morphByS[bestIdx] = morph
+            }
         }
-        // Capture any trailing English text after last token
+
+        // Step 1: strip <m>...</m> entirely so they don't clutter translations.
+        var clean = mRe.stringByReplacingMatches(in: text, range: textRange, withTemplate: "")
+
+        // Step 2: merge double Strong's <S>A</S><S>B</S> → <S>A</S>
+        // (common in Ana+ where the second S is a secondary morphology code).
+        let dblRe = try! NSRegularExpression(pattern: #"(<S>\d+</S>)\s*<S>\d+</S>"#)
+        clean = dblRe.stringByReplacingMatches(
+            in: clean, range: NSRange(location: 0, length: (clean as NSString).length),
+            withTemplate: "$1")
+
+        // Step 3: split on <S>NNNN</S>.
+        // Swift's regex split isn't as clean as Python's — we roll our own.
+        let cleanNS = clean as NSString
+        let sMatches2 = sRe.matches(in: clean,
+                                     range: NSRange(location: 0, length: cleanNS.length))
+        guard !sMatches2.isEmpty else { return [] }
+
+        var tokens: [InterlinearToken] = []
+        var zoneStart = 0
+        let zoneCount = sMatches2.count
+        for i in 0..<zoneCount {
+            let sRange = sMatches2[i].range
+            let sNum   = cleanNS.substring(with: sMatches2[i].range(at: 1))
+
+            // before zone = from end of previous (or start) to current <S>
+            let beforeRange = NSRange(location: zoneStart,
+                                       length: sRange.location - zoneStart)
+            let before = cleanNS.substring(with: beforeRange)
+
+            // after zone = from end of current <S> to start of next <S> (or EOF)
+            let afterStart = sRange.location + sRange.length
+            let afterEnd   = (i + 1 < zoneCount) ? sMatches2[i + 1].range.location : cleanNS.length
+            let after = cleanNS.substring(with: NSRange(location: afterStart,
+                                                         length: afterEnd - afterStart))
+
+            var original = ""
+            var english  = ""
+
+            // Format A / VIN-el: <n>X</n> immediately before <S>
+            if let aRe = try? NSRegularExpression(pattern: #"<n>([^<]*)</n>\s*$"#) {
+                if let am = aRe.firstMatch(in: before,
+                                            range: NSRange(location: 0, length: (before as NSString).length)) {
+                    let nContent = (before as NSString).substring(with: am.range(at: 1))
+                                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    let outside  = stripTags((before as NSString).substring(
+                                        with: NSRange(location: 0, length: am.range.location)))
+                                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    let nIsOrig  = isOriginalScript(nContent)
+                    let oIsOrig  = isOriginalScript(outside)
+                    if nIsOrig && !oIsOrig {
+                        original = nContent
+                        english  = outside
+                    } else if oIsOrig && !nIsOrig {
+                        original = outside.split(separator: " ").last.map(String.init) ?? outside
+                        english  = nContent
+                    } else {
+                        original = nContent
+                        english  = outside
+                    }
+                }
+            }
+
+            if original.isEmpty {
+                // <e>word</e> wrapper (HSB family)
+                if let eRe = try? NSRegularExpression(pattern: #"<e>([^<]*)</e>\s*$"#) {
+                    if let em = eRe.firstMatch(in: before,
+                                                range: NSRange(location: 0, length: (before as NSString).length)) {
+                        original = (before as NSString).substring(with: em.range(at: 1))
+                                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    }
+                }
+                if original.isEmpty {
+                    let cleanedBefore = stripTags(before).trimmingCharacters(in: .whitespacesAndNewlines)
+                    let words = cleanedBefore.split(whereSeparator: { $0.isWhitespace })
+                    if words.isEmpty { continue }
+                    original = String(words.last!)
+                }
+
+                // Translation from after-zone
+                if let nRe = try? NSRegularExpression(pattern: #"^\s*<n>(.*?)</n>"#,
+                                                      options: [.dotMatchesLineSeparators]) {
+                    if let nm = nRe.firstMatch(in: after,
+                                                range: NSRange(location: 0, length: (after as NSString).length)) {
+                        english = stripTags((after as NSString).substring(with: nm.range(at: 1)))
+                                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    }
+                }
+                if english.isEmpty {
+                    let cleanedAfter = stripTags(after).trimmingCharacters(in: .whitespacesAndNewlines)
+                    let words = cleanedAfter.split(whereSeparator: { $0.isWhitespace })
+                    if words.count > 1 {
+                        english = words.dropLast().joined(separator: " ")
+                    }
+                }
+            }
+
+            // Clean up: collapse whitespace, strip quotes/punctuation edges
+            english  = normalizeSpaces(english)
+            original = normalizeSpaces(original)
+            let cruft = CharacterSet(charactersIn: "\u{201C}\u{201D}\" \t\n¦·")
+            english  = english.trimmingCharacters(in: cruft)
+            original = original.trimmingCharacters(in: cruft)
+
+            guard !original.isEmpty else {
+                zoneStart = afterEnd
+                continue
+            }
+
+            tokens.append(InterlinearToken(
+                english:    english,
+                original:   original,
+                strongsNum: prefix + sNum,
+                morphology: morphByS[i] ?? ""))
+
+            zoneStart = afterEnd
+        }
         return tokens
     }
 
-    // MARK: - OT parser (IHOT format)
-    // Hebrew_word <S>number</S>English_words
+    /// Remove all HTML/XML-ish tags from a string.
+    private nonisolated static func stripTags(_ s: String) -> String {
+        guard let re = try? NSRegularExpression(pattern: #"<[^>]+>"#) else { return s }
+        let ns = s as NSString
+        return re.stringByReplacingMatches(
+            in: s, range: NSRange(location: 0, length: ns.length), withTemplate: "")
+    }
+
+    /// Collapse runs of whitespace to a single space.
+    private nonisolated static func normalizeSpaces(_ s: String) -> String {
+        guard let re = try? NSRegularExpression(pattern: #"\s+"#) else { return s }
+        let ns = s as NSString
+        return re.stringByReplacingMatches(
+            in: s, range: NSRange(location: 0, length: ns.length), withTemplate: " ")
+    }
+
+    /// True if `s` contains more Greek/Hebrew characters than Latin/Cyrillic.
+    /// Used to distinguish the original-language word from its translation
+    /// when both could be on either side of <S>.
+    private nonisolated static func isOriginalScript(_ s: String) -> Bool {
+        var originalCount = 0
+        var letterCount   = 0
+        for scalar in s.unicodeScalars {
+            let v = scalar.value
+            if (0x0370...0x03FF).contains(v)   // Greek
+            || (0x1F00...0x1FFF).contains(v)   // Greek Extended
+            || (0x0590...0x05FF).contains(v) { // Hebrew
+                originalCount += 1
+            }
+            if CharacterSet.letters.contains(scalar) {
+                letterCount += 1
+            }
+        }
+        if letterCount == 0 { return false }
+        return Double(originalCount) / Double(letterCount) > 0.5
+    }
+
+    // MARK: - Back-compat shims
+    // Old call sites expected separate parseNT / parseOT. The unified
+    // parser handles both; these wrappers preserve source compatibility.
+
+    private nonisolated static func parseNT(_ text: String, prefix: String) -> [InterlinearToken] {
+        parseInterlinear(text, prefix: prefix, isRTL: false)
+    }
 
     private nonisolated static func parseOT(_ text: String, prefix: String) -> [InterlinearToken] {
-        var tokens: [InterlinearToken] = []
-        let pattern = try! NSRegularExpression(
-            pattern: #"(\S+)\s+<S>(\d+)</S>((?:(?!\S+\s+<S>).)*)"#)
-        let ns = text as NSString
-        let matches = pattern.matches(in: text, range: NSRange(location: 0, length: ns.length))
-        for m in matches {
-            func sub(_ i: Int) -> String {
-                m.range(at: i).location != NSNotFound
-                    ? ns.substring(with: m.range(at: i)).trimmingCharacters(in: .whitespacesAndNewlines)
-                    : ""
-            }
-            let hebrew = sub(1)
-            let snum   = prefix + sub(2)
-            let eng    = sub(3)
-            guard !hebrew.isEmpty else { continue }
-            tokens.append(InterlinearToken(english: eng, original: hebrew,
-                                            strongsNum: snum, morphology: ""))
-        }
-        return tokens
+        parseInterlinear(text, prefix: prefix, isRTL: true)
     }
 
     // MARK: - SQLite helper

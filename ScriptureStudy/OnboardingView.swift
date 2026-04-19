@@ -15,7 +15,7 @@ struct OnboardingView: View {
     private let pages: [(icon: String, title: String, body: String, action: String?)] = [
         (
             icon: "book.fill",
-            title: "Welcome to Graphē ScriptureStudy Pro",
+            title: "Welcome to Graphē One ScriptureStudy Pro",
             body: "A focused Bible study environment for Mac. Bible reading, commentaries, cross-references, interlinear, notes, devotionals, maps, and an AI study assistant — all in one place.",
             action: nil
         ),
@@ -53,6 +53,7 @@ struct OnboardingView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+
             // Dismiss button top right
             HStack {
                 Spacer()
@@ -65,14 +66,14 @@ struct OnboardingView: View {
                 .padding(.top, 12).padding(.trailing, 16)
             }
 
-            // Page content
-            TabView(selection: $page) {
+            // Page content — manual swap, no TabView
+            ZStack {
                 ForEach(Array(pages.enumerated()), id: \.offset) { idx, p in
                     pageView(p, index: idx)
-                        .tag(idx)
+                        .opacity(idx == page ? 1 : 0)
+                        .animation(.easeInOut(duration: 0.2), value: page)
                 }
             }
-            .tabViewStyle(.automatic)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
             Divider()

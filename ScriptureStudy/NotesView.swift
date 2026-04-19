@@ -366,7 +366,7 @@ struct NotesView: View {
             Button("Delete", role: .destructive) { notesManager.delete(note) }
             Button("Cancel", role: .cancel) {}
         } message: { Text("This cannot be undone.") }
-        .onChange(of: note.id) { _ in editingTitle = false }
+        .onChange(of: note.id) { editingTitle = false }
     }
 
     // MARK: - Empty state
@@ -397,8 +397,7 @@ struct NotesView: View {
 
     private func scheduleSave(_ note: Note) {
         saveTimer?.invalidate()
-        saveTimer = Timer.scheduledTimer(withTimeInterval: 0.8, repeats: false) { _ in
-            Task { @MainActor in self.notesManager.save(note) }
+        saveTimer = Timer.scheduledTimer(withTimeInterval: 0.8, repeats: false) { _ in Task { @MainActor in self.notesManager.save(note) }
         }
     }
 

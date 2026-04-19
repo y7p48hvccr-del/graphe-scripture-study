@@ -95,7 +95,7 @@ struct DevotionalView: View {
         }
         .background(theme.background)
         .onAppear { goToToday() }
-        .onChange(of: myBible.selectedDevotional) { _ in load() }
+        .onChange(of: myBible.selectedDevotional) { load() }
     }
 
     // MARK: - Picker

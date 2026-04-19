@@ -36,7 +36,7 @@ class NotesManager: ObservableObject {
 
     private var localDirectory: URL {
         let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("ScriptureStudy Notes", isDirectory: true)
+            .appendingPathComponent("Graphē One Notes", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
     }

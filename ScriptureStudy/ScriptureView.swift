@@ -25,7 +25,7 @@ struct ScriptureView: View {
                     }
                 }
                 .labelsHidden()
-                .onChange(of: selectedBook) { _ in selectedChapter = 1 }
+                .onChange(of: selectedBook) { selectedChapter = 1 }
 
                 Text("CHAPTER")
                     .font(.caption.weight(.semibold))

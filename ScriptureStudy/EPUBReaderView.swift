@@ -2,6 +2,9 @@ import SwiftUI
 import WebKit
 import ZIPFoundation
 
+/// Serial queue for all ZIPFoundation Archive access — Archive is NOT thread-safe.
+private let epubArchiveQueue = DispatchQueue(label: "com.graphe.epub.archive", qos: .userInitiated)
+
 struct EPUBBookmark: Identifiable, Codable {
     let id:      UUID   = UUID()
     let href:    String
@@ -12,6 +15,7 @@ struct EPUBBookmark: Identifiable, Codable {
 
 struct EPUBReaderView: View {
     let epubURL: URL
+    var folderURL:          URL?    = nil   // security-scoped parent folder
     var initialHref:        String? = nil
     var initialSearchQuery: String? = nil
     var initialScrollY:     Double  = 0
@@ -29,6 +33,7 @@ struct EPUBReaderView: View {
     @State private var book:         EPUBBook? = nil
     @State private var archive:      Archive?  = nil
     @State private var isParsing:    Bool      = true
+    @State private var heldFolderURL: URL?     = nil  // keeps folder security scope alive
     @State private var toc:          [TOCItem] = []
     @State private var currentHref:  String    = ""
     @State private var currentTitle: String    = ""
@@ -190,8 +195,19 @@ struct EPUBReaderView: View {
                 }
             }
         }
-        .onAppear { parseBook(); loadBookmarks() }
-        .onChange(of: currentHref) { _ in savePosition() }
+        .onAppear {
+            if let folder = folderURL, heldFolderURL == nil {
+                let ok = folder.startAccessingSecurityScopedResource()
+                if ok { heldFolderURL = folder }
+            }
+            parseBook()
+            loadBookmarks()
+        }
+        .onDisappear {
+            heldFolderURL?.stopAccessingSecurityScopedResource()
+            heldFolderURL = nil
+        }
+        .onChange(of: currentHref) { savePosition() }
     }
 
     var isBookmarked: Bool {
@@ -247,9 +263,7 @@ struct EPUBReaderView: View {
 
     private func parseBook() {
         let epubURL = self.epubURL
-        let didStart = epubURL.startAccessingSecurityScopedResource()
         Task.detached(priority: .userInitiated) {
-            defer { if didStart { epubURL.stopAccessingSecurityScopedResource() } }
             let arc: Archive? = {
                 do {
                     let a = try Archive(url: epubURL, accessMode: .read, pathEncoding: nil)
@@ -268,7 +282,6 @@ struct EPUBReaderView: View {
                     if let href = initialHref, !href.isEmpty {
                         currentHref  = href
                         currentTitle = findTOCItem(href: href, in: b.toc)?.title ?? ""
-                        // Restore scroll position if provided (e.g. opened from bookmark)
                         if initialScrollY > 0 {
                             restoreScrollY = initialScrollY
                         }
@@ -621,15 +634,14 @@ struct EPUBPageView: WKViewRepresentable {
         coordinator.isLoading   = true
         // Show loading placeholder immediately
         wv.loadHTMLString(EPUBParser.loadingPage(theme: theme, fontSize: fontSize), baseURL: nil)
-        Task.detached(priority: .userInitiated) {
+        epubArchiveQueue.async {
             let html = EPUBParser.pageContent(
                 href: href, archive: archive,
                 theme: theme, fontSize: fontSize, fontName: fontName)
-            await MainActor.run {
+            DispatchQueue.main.async {
                 wv.loadHTMLString(html, baseURL: nil)
                 coordinator.hasContent = true
                 coordinator.isLoading  = false
-                // Restore scroll position after page renders
                 if restoreY > 0 {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                         wv.evaluateJavaScript("window.scrollTo(0, \(restoreY))")

@@ -65,15 +65,29 @@ struct LocalBibleView: View {
         }.flatMap { $0.verseNumbers })
     }
 
+    // Pre-computed once per chapter — avoids calling notes(forBook:chapter:verse:)
+    // inside the ForEach on every scroll frame
+    var linkedNotesMap: [Int: [Note]] {
+        let chapterNotes = notesManager.notes.filter {
+            $0.bookNumber == selectedBookNumber &&
+            $0.chapterNumber == selectedChapter
+        }
+        var map: [Int: [Note]] = [:]
+        for note in chapterNotes {
+            for v in note.verseNumbers {
+                map[v, default: []].append(note)
+            }
+        }
+        return map
+    }
+
     var body: some View {
         readingColumn
         .onAppear { loadAvailableBooks(); Task { await loadChapter() } }
-        .onChange(of: myBible.selectedBible) { _ in
-            loadAvailableBooks()
+        .onChange(of: myBible.selectedBible) { loadAvailableBooks()
             Task { await loadChapter() }
         }
-        .onChange(of: myBible.modules) { _ in
-            // Modules just finished scanning — reload books if we have a Bible now
+        .onChange(of: myBible.modules) { // Modules just finished scanning — reload books if we have a Bible now
             if !myBible.modules.isEmpty {
                 loadAvailableBooks()
                 if !availableBooks.isEmpty { Task { await loadChapter() } }
@@ -81,6 +95,32 @@ struct LocalBibleView: View {
         }
 
 
+        .onReceive(NotificationCenter.default.publisher(
+                for: Notification.Name("createNoteForVerse"))) { note in
+            guard let bn = note.userInfo?["bookNumber"] as? Int,
+                  let ch = note.userInfo?["chapter"]    as? Int,
+                  let vs = note.userInfo?["verse"]       as? Int,
+                  bn == selectedBookNumber, ch == selectedChapter else { return }
+            createNoteForVerse(vs)
+        }
+        .onReceive(NotificationCenter.default.publisher(
+                for: Notification.Name("dictionaryWordTapped"))) { note in
+            guard let word = note.userInfo?["word"] as? String else { return }
+            NotificationCenter.default.post(
+                name: Notification.Name("lookupDictionaryWord"),
+                object: nil,
+                userInfo: ["word": word]
+            )
+        }
+        .onReceive(NotificationCenter.default.publisher(
+                for: Notification.Name("encyclopediaWordTapped"))) { note in
+            guard let word = note.userInfo?["word"] as? String else { return }
+            NotificationCenter.default.post(
+                name: Notification.Name("lookupEncyclopediaWord"),
+                object: nil,
+                userInfo: ["word": word]
+            )
+        }
         .onReceive(NotificationCenter.default.publisher(for: .navigateToPassage)) { note in
             guard let bn = note.userInfo?["bookNumber"] as? Int,
                   let ch = note.userInfo?["chapter"]    as? Int else { return }
@@ -192,8 +232,7 @@ struct LocalBibleView: View {
             }
             .menuStyle(.borderlessButton)
             .fixedSize()
-            .onChange(of: selectedBookNumber) { _ in
-                guard !isNavigatingToPassage else { return }
+            .onChange(of: selectedBookNumber) { guard !isNavigatingToPassage else { return }
                 selectedChapter = 1; updateChapterCount(); selectedVerse = 0
                 Task { await loadChapter() }
             }
@@ -211,8 +250,7 @@ struct LocalBibleView: View {
             }
             .menuStyle(.borderlessButton)
             .fixedSize()
-            .onChange(of: selectedChapter) { _ in
-                guard !isNavigatingToPassage else { return }
+            .onChange(of: selectedChapter) { guard !isNavigatingToPassage else { return }
                 selectedVerse = 0
                 Task { await loadChapter() }
             }
@@ -359,11 +397,7 @@ struct LocalBibleView: View {
                         let _ = annotatedVerses // observe changes
                         let isSelected  = selectedVerse == verse.verse
                         let hasNote     = annotatedVerses.contains(verse.verse)
-                        let linkedNotes = notesManager.notes(
-                            forBook: selectedBookNumber,
-                            chapter: selectedChapter,
-                            verse:   verse.verse
-                        )
+                        let linkedNotes = linkedNotesMap[verse.verse] ?? []
                         VerseWithStrongsView(
                             verse:         verse,
                             rawText:       myBible.rawVerseTexts[verse.verse] ?? verse.text,
@@ -407,11 +441,10 @@ struct LocalBibleView: View {
                 broadcastTopVerse()
             }
 
-            .onChange(of: selectedVerse) { v in
+            .onChange(of: selectedVerse) { _, v in
                 if v > 0 { proxy.scrollTo(v, anchor: .top) }
             }
-            .onChange(of: scrollToTopTrigger) { _ in
-                let v = historyStack[safe: historyIndex]?.verse ?? 0
+            .onChange(of: scrollToTopTrigger) { let v = historyStack[safe: historyIndex]?.verse ?? 0
                 if v > 0 {
                     proxy.scrollTo(v, anchor: .top)
                 } else {
@@ -658,8 +691,7 @@ struct LocalBibleView: View {
         toastIsProgress = isProgress
         withAnimation { toastVisible = true }
         if autoDismiss > 0 {
-            toastTimer = Timer.scheduledTimer(withTimeInterval: autoDismiss, repeats: false) { _ in
-                withAnimation { self.toastVisible = false }
+            toastTimer = Timer.scheduledTimer(withTimeInterval: autoDismiss, repeats: false) { _ in withAnimation { self.toastVisible = false }
             }
         }
     }

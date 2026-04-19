@@ -8,30 +8,17 @@ struct LaunchScreenView: View {
     @State private var opacity: Double  = 0.0
     @State private var fadeScale: CGFloat = 1.0
 
-    private let skyBlue = Color(red: 0.659, green: 0.784, blue: 0.878)
-    private let gold    = Color(red: 0.784, green: 0.663, blue: 0.431)
+    private let skyBlue = Color(red: 0.788, green: 0.843, blue: 0.894)
 
     var body: some View {
         ZStack {
             skyBlue.ignoresSafeArea()
-            VStack(spacing: 20) {
-                LogoView()
-                    .frame(width: 200, height: 200)
-                    .scaleEffect(scale * fadeScale)
-                    .opacity(opacity)
-                VStack(spacing: 6) {
-                    Text("Graph\u{0113}")
-                        .font(.system(size: 34, weight: .light, design: .serif))
-                        .italic()
-                        .foregroundStyle(gold)
-                        .opacity(opacity)
-                    Text("SCRIPTURE STUDY")
-                        .font(.system(size: 13, weight: .light, design: .serif))
-                        .tracking(4)
-                        .foregroundStyle(gold.opacity(0.75))
-                        .opacity(opacity)
-                }
-            }
+            Image("GrapheOneLogo")
+                .resizable()
+                .scaledToFit()
+                .frame(width: 320, height: 320)
+                .scaleEffect(scale * fadeScale)
+                .opacity(opacity)
         }
         .onAppear {
             guard showAnimation else { onComplete(); return }
@@ -40,16 +27,14 @@ struct LaunchScreenView: View {
     }
 
     private func runAnimation() {
-        // Entrance — slow gentle rise over 1.8 seconds
         withAnimation(.easeOut(duration: 1.8)) {
             scale   = 1.0
             opacity = 1.0
         }
-        // Hold briefly, then fade while continuing to grow
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.2) {
             withAnimation(.easeOut(duration: 1.8)) {
                 opacity   = 0.0
-                fadeScale = 1.5   // grows to 1.5× while fading
+                fadeScale = 1.5
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.85) { onComplete() }
         }
@@ -59,7 +44,7 @@ struct LaunchScreenView: View {
 // MARK: - Logo View
 
 struct LogoView: View {
-    private let skyBlue = Color(red: 0.659, green: 0.784, blue: 0.878)
+    private let skyBlue = Color(red: 0.788, green: 0.843, blue: 0.894)
     private let gold    = Color(red: 0.784, green: 0.663, blue: 0.431)
 
     var body: some View {

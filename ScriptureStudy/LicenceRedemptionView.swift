@@ -29,7 +29,7 @@ final class RedemptionService: ObservableObject {
     // or             { "valid": false, "message": "Code not found or already used" }
 
     private let validateEndpoint = "https://api.graphescripture.com/v1/redeem/validate"
-    private let userAgent        = "GrapheScriptureStudy/1.0"
+    private let userAgent        = "GrapheOne/1.0"
     // ─────────────────────────────────────────────────────────────────
 
     func redeem(code: String, destinationFolder: String) async {
@@ -170,7 +170,7 @@ struct LicenceRedemptionView: View {
             // ── Header ────────────────────────────────────────────────
             VStack(alignment: .leading, spacing: 4) {
                 HStack {
-                    Image("GrapheLogo")
+                    Image("GrapheOneLogo")
                         .resizable()
                         .aspectRatio(contentMode: .fit)
                         .frame(width: 32, height: 32)

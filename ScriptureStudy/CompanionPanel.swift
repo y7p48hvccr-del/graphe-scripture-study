@@ -50,7 +50,11 @@ struct CompanionPanel: View {
     @State private var companionVerses:   [MyBibleVerse]    = []
     @State private var companionModule:   MyBibleModule?
     @State private var commentaryEntries: [CommentaryEntry] = []
-    @State private var commentaryModule:  MyBibleModule?
+    // commentaryModule now lives on myBible.selectedCommentary for cross-view access
+    private var commentaryModule: MyBibleModule? {
+        get { myBible.selectedCommentary }
+        nonmutating set { myBible.selectedCommentary = newValue }
+    }
     @State private var isLoading         = false
     @State private var syncedVerse:       Int               = 0
     @State private var syncScrollVerse:    Int               = 0
@@ -103,10 +107,10 @@ struct CompanionPanel: View {
             pbCount = NSPasteboard.general.changeCount
             #endif
         }
-        .onChange(of: bookNumber) { _ in syncedVerse = 0; syncScrollVerse = 0; verseNoteIDs = []; crossRefGroups = []; xrefBook = nil; xrefChapter = nil; xrefVerse = 0; load() }
-        .onChange(of: chapter)    { _ in syncedVerse = 0; syncScrollVerse = 0; verseNoteIDs = []; crossRefGroups = []; xrefBook = nil; xrefChapter = nil; xrefVerse = 0; load() }
-        .onChange(of: myBible.selectedDictionary) { _ in
-            guard !dictWord.isEmpty else { return }
+        .onChange(of: bookNumber) { syncedVerse = 0; syncScrollVerse = 0; verseNoteIDs = []; crossRefGroups = []; xrefBook = nil; xrefChapter = nil; xrefVerse = 0; load() }
+        .onChange(of: chapter)    { syncedVerse = 0; syncScrollVerse = 0; verseNoteIDs = []; crossRefGroups = []; xrefBook = nil; xrefChapter = nil; xrefVerse = 0; load() }
+        .onChange(of: myBible.selectedDictionary) { _, _ in
+                guard !dictWord.isEmpty else { return }
             dictDefinition = nil
             dictIsLoading  = true
             let word    = dictWord
@@ -120,8 +124,8 @@ struct CompanionPanel: View {
                 }
             }
         }
-        .onChange(of: myBible.selectedEncyclopedia) { _ in
-            guard !encycWord.isEmpty else { return }
+        .onChange(of: myBible.selectedEncyclopedia) { _, _ in
+                guard !encycWord.isEmpty else { return }
             encycDefinition = nil
             encycIsLoading  = true
             let word    = encycWord
@@ -135,8 +139,49 @@ struct CompanionPanel: View {
                 }
             }
         }
-        .onReceive(Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()) { _ in
-            checkClipboard()
+        .onReceive(Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()) { _ in checkClipboard()
+        }
+        .onReceive(NotificationCenter.default.publisher(
+                for: Notification.Name("switchCompanionToCommentary"))) { _ in
+            modeRaw = CompanionMode.commentary.rawValue
+        }
+        .onReceive(NotificationCenter.default.publisher(
+                for: Notification.Name("lookupDictionaryWord"))) { note in
+            guard let word = note.userInfo?["word"] as? String else { return }
+            let clean = word.trimmingCharacters(in: .punctuationCharacters)
+            guard clean.count >= 2 else { return }
+            dictWord       = clean
+            dictDefinition = nil
+            dictIsLoading  = true
+            modeRaw        = CompanionMode.strongs.rawValue
+            let service    = myBible
+            Task {
+                let result = await service.lookupDictionaryWord(word: clean)
+                await MainActor.run {
+                    dictWord       = result?.topic ?? clean
+                    dictDefinition = result?.definition
+                    dictIsLoading  = false
+                }
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(
+                for: Notification.Name("lookupEncyclopediaWord"))) { note in
+            guard let word = note.userInfo?["word"] as? String else { return }
+            let clean = word.trimmingCharacters(in: .punctuationCharacters)
+            guard clean.count >= 2 else { return }
+            encycWord       = clean
+            encycDefinition = nil
+            encycIsLoading  = true
+            modeRaw         = CompanionMode.encyclopedia.rawValue
+            let service     = myBible
+            Task {
+                let result = await service.lookupWord(word: clean, in: service.selectedEncyclopedia)
+                await MainActor.run {
+                    encycWord       = result?.topic ?? clean
+                    encycDefinition = result?.definition
+                    encycIsLoading  = false
+                }
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: Notification.Name("showVerseNotes"))) { notification in
             guard let notes = notification.userInfo?["notes"] as? [Note],
@@ -661,11 +706,10 @@ struct CompanionPanel: View {
             }
         }
 
-        // Always update dictionary/strongs
+        // Update dictionary in background — do NOT switch mode automatically
         dictWord       = clean
         dictDefinition = nil
         dictIsLoading  = true
-        modeRaw        = CompanionMode.strongs.rawValue
 
         Task {
             let result = await service.lookupDictionaryWord(word: clean)
@@ -734,14 +778,19 @@ struct CompanionPanel: View {
             Group {
                 switch mode {
                 case .commentary:
-                    Picker("", selection: $commentaryModule) {
+                    Picker("", selection: Binding(
+                        get: { myBible.selectedCommentary },
+                        set: { myBible.selectedCommentary = $0 }
+                    )) {
                         Text("Select…").tag(Optional<MyBibleModule>.none)
                         ForEach(commentaryModules) { m in Text(m.name).tag(Optional(m)) }
                     }
                     .labelsHidden().font(.caption)
-                    .onChange(of: commentaryModule) { _ in load() }
+                    .onChange(of: myBible.selectedCommentary) { load() }
                     .onAppear {
-                        if commentaryModule == nil { commentaryModule = commentaryModules.first }
+                        if myBible.selectedCommentary == nil {
+                            myBible.selectedCommentary = commentaryModules.first
+                        }
                     }
 
                 case .strongs:
@@ -1011,7 +1060,7 @@ struct CompanionPanel: View {
                      ? "\(myBibleBookNumbers[xrefBook!] ?? bookName) \(xrefChapter ?? chapter)"
                      : "\(bookName) \(chapter)")
                     .font(resolvedFont.bold()).foregroundStyle(theme.text).padding(.bottom, 4)
-                if let m = commentaryModule {
+                if let m = myBible.selectedCommentary {
                     Text(m.name).font(.caption).foregroundStyle(theme.secondary).padding(.bottom, 16)
                 }
                 commentaryContent
@@ -1069,21 +1118,38 @@ struct CompanionPanel: View {
                     .id(verse.verse)
                 }
             }
-            .onChange(of: syncedVerse) { v in
+            .onChange(of: syncedVerse) { _, v in
                 if v > 0 && xrefBook == nil { withAnimation { proxy.scrollTo(v, anchor: .center) } }
             }
-            .onChange(of: xrefVerse) { v in
+            .onChange(of: xrefVerse) { _, v in
                 if v > 0 { withAnimation { proxy.scrollTo(v, anchor: .center) } }
             }
-            .onChange(of: syncScrollVerse) { v in
+            .onChange(of: syncScrollVerse) { _, v in
                 if v > 0 && xrefBook == nil { proxy.scrollTo(v, anchor: .top) }
             }
         }
     }
 
+    /// Find the best commentary entry for a verse:
+    /// Prefers the most specific (smallest range) entry covering the verse.
+    /// Falls back to any entry that covers the verse.
+    /// Falls back to chapter overview (verseFrom == 0) if nothing else.
+    private func bestEntry(for verse: Int) -> CommentaryEntry? {
+        let covering = commentaryEntries.filter {
+            $0.verseFrom <= verse && verse <= $0.verseTo && $0.verseFrom > 0
+        }
+        if let specific = covering.min(by: { ($0.verseTo - $0.verseFrom) < ($1.verseTo - $1.verseFrom) }) {
+            return specific
+        }
+        // Fall back to chapter overview entry (verseFrom == 0 covers whole chapter)
+        return commentaryEntries.first { $0.verseFrom == 0 } ?? commentaryEntries.first
+    }
+
     private var commentaryContent: some View {
         ScrollViewReader { proxy in
-            LazyVStack(alignment: .leading, spacing: 0) {
+            // Use VStack not LazyVStack — LazyVStack causes erratic scrolling
+            // in very large commentaries like Biblical Illustrator
+            VStack(alignment: .leading, spacing: 0) {
                 ForEach(commentaryEntries) { entry in
                     let isSynced = syncedVerse > 0 &&
                         entry.verseFrom <= syncedVerse && syncedVerse <= entry.verseTo
@@ -1101,20 +1167,16 @@ struct CompanionPanel: View {
                     .id(entry.verseFrom)
                 }
             }
-            .onChange(of: commentaryEntries) { _ in
+            .onChange(of: commentaryEntries) { _, _ in
                 guard syncedVerse > 0,
-                      let entry = commentaryEntries.first(where: {
-                          $0.verseFrom <= syncedVerse && syncedVerse <= $0.verseTo
-                      }) else { return }
+                      let entry = bestEntry(for: syncedVerse) else { return }
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
                     withAnimation { proxy.scrollTo(entry.verseFrom, anchor: .top) }
                 }
             }
-            .onChange(of: syncedVerse) { v in
+            .onChange(of: syncedVerse) { _, v in
                 guard v > 0, !commentaryEntries.isEmpty,
-                      let entry = commentaryEntries.first(where: {
-                          $0.verseFrom <= v && v <= $0.verseTo
-                      }) else { return }
+                      let entry = bestEntry(for: v) else { return }
                 withAnimation { proxy.scrollTo(entry.verseFrom, anchor: .top) }
             }
         }
@@ -1135,7 +1197,7 @@ struct CompanionPanel: View {
                 await MainActor.run { companionVerses = verses; isLoading = false }
             }
         } else {
-            guard let module = commentaryModule else { isLoading = false; return }
+            guard let module = myBible.selectedCommentary else { isLoading = false; return }
             Task {
                 let entries = await myBible.fetchCommentaryEntries(module: module,
                                                                    bookNumber: bookNumber, chapter: chapter)

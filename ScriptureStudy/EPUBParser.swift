@@ -382,6 +382,7 @@ struct TOCItem: Identifiable {
     let id         = UUID()
     let title:     String
     let href:      String
+    var fragment:  String?       // optional anchor inside the file (e.g. "ch5")
     var children:  [TOCItem] = []
     var isExpanded: Bool     = false
 }
@@ -424,54 +425,47 @@ class EPUBParser {
 
     /// Primary parse entry point — uses the supplied archive so no second open is needed.
     static func parse(url: URL, archive: Archive) -> EPUBBook? {
-        print("DEBUG PARSE: start")
         var book = EPUBBook(url: url)
 
         // 1. container.xml -> OPF path
-        print("DEBUG PARSE: reading container.xml")
         guard let containerData = read("META-INF/container.xml", from: archive),
               let containerStr  = String(data: containerData, encoding: .utf8),
               let opfPath       = firstCapture(in: containerStr, pattern: "full-path=\"([^\"]+)\"")
-        else { print("DEBUG PARSE: container.xml failed"); return nil }
+        else { return nil }
 
-        print("DEBUG PARSE: opfPath = \(opfPath)")
         book.opfBase = (opfPath as NSString).deletingLastPathComponent
 
         // 2. OPF metadata
-        print("DEBUG PARSE: reading OPF")
         guard let opfData = read(opfPath, from: archive),
               let opfStr  = String(data: opfData, encoding: .utf8)
-        else { print("DEBUG PARSE: OPF failed"); return nil }
+        else { return nil }
 
-        print("DEBUG PARSE: parsing metadata")
         book.title  = tagContent("dc:title",   in: opfStr) ?? url.deletingPathExtension().lastPathComponent
         book.author = tagContent("dc:creator", in: opfStr) ?? ""
 
         // 3. Manifest id -> href map
-        print("DEBUG PARSE: building manifest")
         let manifest = buildManifest(opfStr, base: book.opfBase)
-        print("DEBUG PARSE: manifest has \(manifest.count) items")
 
         // 4. Cover image
-        print("DEBUG PARSE: finding cover")
         book.coverImage = findCover(opfStr: opfStr, manifest: manifest, archive: archive)
-        print("DEBUG PARSE: cover done")
 
         // 5. TOC - try NAV (epub3) then NCX (epub2)
-        print("DEBUG PARSE: building TOC")
         if let navHref = manifest.values.first(where: { $0.hasSuffix("nav.xhtml") || $0.contains("/nav.") }),
            let navData  = read(navHref, from: archive),
            let navStr   = String(data: navData, encoding: .utf8) {
-            print("DEBUG PARSE: using NAV toc")
             book.toc = parseNavTOC(navStr, base: book.opfBase)
         } else if let ncxHref = manifest.values.first(where: { $0.hasSuffix(".ncx") }),
                   let ncxData  = read(ncxHref, from: archive),
                   let ncxStr   = String(data: ncxData, encoding: .utf8) {
-            print("DEBUG PARSE: using NCX toc")
             book.toc = parseNCXTOC(ncxStr, base: book.opfBase)
         }
 
-        print("DEBUG PARSE: done, title=\(book.title) toc=\(book.toc.count)")
+        // 6. If TOC is flat (no nesting), try to synthesize chapter children
+        //    from anchor links inside each top-level entry's content page.
+        //    Useful for Bibles where the publisher only lists books in the TOC
+        //    and puts chapter links at the top of each book's first page.
+        book.toc = synthesizeChildrenFromContent(toc: book.toc, archive: archive)
+
         return book
     }
 
@@ -493,14 +487,28 @@ class EPUBParser {
 
     static func pageContent(href: String, archive: Archive,
                             theme: AppTheme, fontSize: Double, fontName: String) -> String {
-        // Check cache before touching the ZIP archive (only when pre-caching is on)
-        let key = cacheKey(href: href, theme: theme, fontSize: fontSize)
-        if UserDefaults.standard.bool(forKey: "preCacheEpubPages"),
-           let cached = pageCache.object(forKey: key) {
-            return cached as String
+        // Split off the #fragment — archive lookups must use the bare file path.
+        // The fragment, if any, will be used to scroll to that anchor after load.
+        let filePath: String
+        let fragment: String?
+        if let hashIdx = href.firstIndex(of: "#") {
+            filePath = String(href[..<hashIdx])
+            fragment = String(href[href.index(after: hashIdx)...])
+        } else {
+            filePath = href
+            fragment = nil
         }
 
-        guard let data = read(href, from: archive),
+        // Cache key uses only the file path + styling — the same file rendered
+        // for two different fragments is the same HTML; we just scroll to a
+        // different anchor. Avoids duplicate cache entries per book in a shared file.
+        let key = cacheKey(href: filePath, theme: theme, fontSize: fontSize)
+        if UserDefaults.standard.bool(forKey: "preCacheEpubPages"),
+           let cached = pageCache.object(forKey: key) {
+            return injectFragmentScroll(into: cached as String, fragment: fragment)
+        }
+
+        guard let data = read(filePath, from: archive),
               var html = String(data: data, encoding: .utf8)
                       ?? String(data: data, encoding: .isoLatin1)
         else { return loadingPage(theme: theme, fontSize: fontSize) }
@@ -562,21 +570,80 @@ class EPUBParser {
             }
         }
 
-        // Cache if pre-caching is enabled
+        // Cache if pre-caching is enabled — cache the bare page, scroll script
+        // is injected fresh each call so it honours the current fragment.
         if usePageCache {
             pageCache.setObject(html as NSString, forKey: key)
         }
 
-        return html
+        return injectFragmentScroll(into: html, fragment: fragment)
+    }
+
+    /// Append a script that scrolls to the given element ID once the page is laid out.
+    /// No-op when fragment is nil or empty.
+    private static func injectFragmentScroll(into html: String, fragment: String?) -> String {
+        guard let frag = fragment, !frag.isEmpty else { return html }
+        // JSON-escape to be safe — fragment IDs can contain unusual characters.
+        let safe = frag.replacingOccurrences(of: "\\", with: "\\\\")
+                        .replacingOccurrences(of: "'",  with: "\\'")
+        let scroll = """
+        <script>
+        (function() {
+            var targetId = '\(safe)';
+            var attempts = 0;
+            function jump() {
+                attempts++;
+                var el = document.getElementById(targetId);
+                if (!el) {
+                    // Element may not exist; give up silently after first try.
+                    return;
+                }
+                var rect = el.getBoundingClientRect();
+                var y = rect.top + window.pageYOffset - 60;
+                window.scrollTo(0, y < 0 ? 0 : y);
+                // If layout shifts after fonts/CSS apply, position will
+                // change — retry a few times over the first ~500ms.
+                if (attempts < 5) { setTimeout(jump, 80); }
+            }
+            function start() { requestAnimationFrame(jump); }
+            if (document.readyState === 'complete') {
+                start();
+            } else {
+                window.addEventListener('load', start);
+                // Also try earlier in case 'load' is slow (large pages, images)
+                if (document.readyState === 'interactive') {
+                    setTimeout(start, 50);
+                } else {
+                    window.addEventListener('DOMContentLoaded', function() {
+                        setTimeout(start, 50);
+                    });
+                }
+            }
+        })();
+        </script>
+        """
+        if let bodyEnd = html.range(of: "</body>", options: [.caseInsensitive, .backwards]) {
+            return html.replacingCharacters(in: bodyEnd, with: scroll + "</body>")
+        }
+        return html + scroll
     }
 
     // MARK: - Archive helpers
 
     static func read(_ path: String, from archive: Archive) -> Data? {
-        guard let entry = archive[path] else { return nil }
+        guard let entry = archive[path] else {
+            return nil
+        }
         var out = Data()
-        _ = try? archive.extract(entry) { out.append($0) }
-        return out.isEmpty ? nil : out
+        out.reserveCapacity(Int(entry.uncompressedSize))
+        do {
+            _ = try archive.extract(entry) { chunk in
+                out.append(chunk)
+            }
+            return out.isEmpty ? nil : out
+        } catch {
+            return nil
+        }
     }
 
     // MARK: - XML helpers
@@ -702,24 +769,174 @@ class EPUBParser {
 
     private static func parseOLItems(_ html: String, base: String) -> [TOCItem] {
         var items: [TOCItem] = []
-        guard let liRe = try? NSRegularExpression(pattern: "<li[^>]*>([\\s\\S]*?)</li>"),
-              let aRe  = try? NSRegularExpression(pattern: "<a[^>]+href=\"([^\"]+)\"[^>]*>([^<]+)</a>")
-        else { return [] }
-        let ns = html as NSString
-        liRe.enumerateMatches(in: html, range: NSRange(location: 0, length: (html as NSString).length)) { m, _, _ in
-            guard let m = m else { return }
-            let li   = ns.substring(with: m.range(at: 1))
-            let liNS = li as NSString
-            guard let aM = aRe.firstMatch(in: li, range: NSRange(location: 0, length: (li as NSString).length)) else { return }
-            var rawHref = liNS.substring(with: aM.range(at: 1))
-            if let hash = rawHref.firstIndex(of: "#") { rawHref = String(rawHref[..<hash]) }
-            let title   = liNS.substring(with: aM.range(at: 2)).trimmingCharacters(in: .whitespacesAndNewlines)
-            let href    = base.isEmpty ? rawHref : "\(base)/\(rawHref)"
-            var item    = TOCItem(title: title, href: href)
-            if li.contains("<ol") { item.children = parseOLItems(li, base: base) }
+        // Extract the contents of the outermost <ol>...</ol> (if present), then
+        // walk that one level finding only the top-level <li>…</li> children.
+        // Nested <ol> blocks inside a <li> are handed off to a recursive call.
+        let scope = outermostTag("ol", in: html) ?? html
+        for li in topLevelTagBodies("li", in: scope) {
+            // The <a> or <span> naming this row lives BEFORE any nested <ol>.
+            // Slicing there avoids the first <a> match being a descendant that
+            // belongs to a child entry (which would misname the parent).
+            let liNS   = li as NSString
+            let olRng  = liNS.range(of: "<ol", options: .caseInsensitive)
+            let header: String = olRng.location == NSNotFound
+                ? li
+                : liNS.substring(to: olRng.location)
+
+            let title: String
+            let href:  String
+            if let aMatch = firstTag("a", in: header) {
+                let rawHref = attribute("href", in: aMatch.openTag) ?? ""
+                title = textBetween(aMatch.openTag, and: "</a>", in: header)
+                         .trimmingCharacters(in: .whitespacesAndNewlines)
+                href  = base.isEmpty ? rawHref : "\(base)/\(rawHref)"
+            } else if let sMatch = firstTag("span", in: header) {
+                title = textBetween(sMatch.openTag, and: "</span>", in: header)
+                         .trimmingCharacters(in: .whitespacesAndNewlines)
+                href  = ""   // structural header, not navigable
+            } else {
+                continue
+            }
+            var item = TOCItem(title: title, href: href)
+            // Recurse into any nested <ol> inside this <li> for children.
+            if let inner = outermostTag("ol", in: li) {
+                item.children = parseOLItems(inner, base: base)
+            }
             items.append(item)
         }
         return items
+    }
+
+    // MARK: - Small HTML/XML helpers used by the TOC parsers
+    //
+    // These are intentionally tiny and specific: they don't try to be a
+    // general HTML parser — just enough to pick top-level children of a
+    // known tag while respecting nesting.
+
+    /// Returns the inner text of the first <tag>…</tag> found at any depth in `s`,
+    /// or nil if there isn't one. Used for getting the contents of the outer
+    /// <ol> or <navMap> before iterating its top-level children.
+    private static func outermostTag(_ tag: String, in s: String) -> String? {
+        let ns = s as NSString
+        guard let open = ns.range(of: "<\(tag)", options: .caseInsensitive).upperBoundOrNil else { return nil }
+        // Find end of the opening tag (the '>').
+        guard let gt = ns.range(of: ">", range: NSRange(location: open, length: ns.length - open)).upperBoundOrNil
+        else { return nil }
+        // Now walk looking for the matching </tag> counting nesting.
+        var depth = 1
+        var idx   = gt
+        let openPat  = "<\(tag)"
+        let closePat = "</\(tag)>"
+        while idx < ns.length {
+            let rest = NSRange(location: idx, length: ns.length - idx)
+            let nextOpen  = ns.range(of: openPat,  options: .caseInsensitive, range: rest)
+            let nextClose = ns.range(of: closePat, options: .caseInsensitive, range: rest)
+            if nextClose.location == NSNotFound { return nil }
+            if nextOpen.location != NSNotFound && nextOpen.location < nextClose.location {
+                depth += 1
+                idx = nextOpen.location + nextOpen.length
+            } else {
+                depth -= 1
+                if depth == 0 {
+                    return ns.substring(with: NSRange(location: gt, length: nextClose.location - gt))
+                }
+                idx = nextClose.location + nextClose.length
+            }
+        }
+        return nil
+    }
+
+    /// Returns the inner bodies of every direct <tag>…</tag> child inside `s`,
+    /// skipping any tags found inside a deeper nesting level.
+    private static func topLevelTagBodies(_ tag: String, in s: String) -> [String] {
+        var result: [String] = []
+        let ns = s as NSString
+        let openPat  = "<\(tag)"
+        let closePat = "</\(tag)>"
+        var idx = 0
+        while idx < ns.length {
+            let rest = NSRange(location: idx, length: ns.length - idx)
+            let open = ns.range(of: openPat, options: .caseInsensitive, range: rest)
+            if open.location == NSNotFound { break }
+            // Locate end of the opening tag.
+            guard let gt = ns.range(of: ">", range: NSRange(location: open.location + open.length,
+                                                            length: ns.length - open.location - open.length)).upperBoundOrNil
+            else { break }
+            // Walk to matching close, counting nesting.
+            var depth = 1
+            var j = gt
+            var bodyEnd = -1
+            var afterClose = -1
+            while j < ns.length {
+                let r = NSRange(location: j, length: ns.length - j)
+                let nextOpen  = ns.range(of: openPat,  options: .caseInsensitive, range: r)
+                let nextClose = ns.range(of: closePat, options: .caseInsensitive, range: r)
+                if nextClose.location == NSNotFound { break }
+                if nextOpen.location != NSNotFound && nextOpen.location < nextClose.location {
+                    depth += 1
+                    j = nextOpen.location + nextOpen.length
+                } else {
+                    depth -= 1
+                    if depth == 0 {
+                        bodyEnd    = nextClose.location
+                        afterClose = nextClose.location + nextClose.length
+                        break
+                    }
+                    j = nextClose.location + nextClose.length
+                }
+            }
+            if bodyEnd < 0 { break }
+            result.append(ns.substring(with: NSRange(location: gt, length: bodyEnd - gt)))
+            idx = afterClose
+        }
+        return result
+    }
+
+    /// Locates the first <tag …> opening in `s` and returns both its opening-tag
+    /// text (e.g. `<a href="…" class="…">`) and the offset where its body starts.
+    private static func firstTag(_ tag: String, in s: String) -> (openTag: String, bodyStart: Int)? {
+        let ns = s as NSString
+        let r  = ns.range(of: "<\(tag)", options: .caseInsensitive)
+        guard r.location != NSNotFound else { return nil }
+        let afterName = r.location + r.length
+        let gtR = ns.range(of: ">", range: NSRange(location: afterName, length: ns.length - afterName))
+        guard gtR.location != NSNotFound else { return nil }
+        let openLen = gtR.location + gtR.length - r.location
+        let openStr = ns.substring(with: NSRange(location: r.location, length: openLen))
+        return (openStr, gtR.location + gtR.length)
+    }
+
+    /// Returns the attribute value for `name` in an opening-tag string like `<a href="foo" …>`.
+    private static func attribute(_ name: String, in openTag: String) -> String? {
+        guard let re = try? NSRegularExpression(pattern: "\(name)\\s*=\\s*\"([^\"]*)\"",
+                                                options: .caseInsensitive) else { return nil }
+        let ns = openTag as NSString
+        guard let m = re.firstMatch(in: openTag, range: NSRange(location: 0, length: ns.length)) else { return nil }
+        return ns.substring(with: m.range(at: 1))
+    }
+
+    /// Returns the text between `openTag` and the first occurrence of `closeTag` in `s`.
+    private static func textBetween(_ openTag: String, and closeTag: String, in s: String) -> String {
+        let ns = s as NSString
+        let oR = ns.range(of: openTag)
+        guard oR.location != NSNotFound else { return "" }
+        let start = oR.location + oR.length
+        let cR = ns.range(of: closeTag, options: .caseInsensitive,
+                          range: NSRange(location: start, length: ns.length - start))
+        guard cR.location != NSNotFound else { return "" }
+        // Strip any inner tags — leaf TOC entries' labels should be plain text.
+        let raw = ns.substring(with: NSRange(location: start, length: cR.location - start))
+        let stripped = raw.replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
+        // Decode a handful of common HTML entities so titles like "Wisdom &amp; Poetry"
+        // render as "Wisdom & Poetry" in the TOC.
+        return stripped
+            .replacingOccurrences(of: "&amp;",  with: "&")
+            .replacingOccurrences(of: "&lt;",   with: "<")
+            .replacingOccurrences(of: "&gt;",   with: ">")
+            .replacingOccurrences(of: "&quot;", with: "\"")
+            .replacingOccurrences(of: "&#39;",  with: "'")
+            .replacingOccurrences(of: "&apos;", with: "'")
+            .replacingOccurrences(of: "&nbsp;", with: " ")
     }
 
     // MARK: - NCX TOC (EPUB2)
@@ -730,18 +947,10 @@ class EPUBParser {
 
     private static func parseNavPoints(_ xml: String, base: String) -> [TOCItem] {
         var items: [TOCItem] = []
-        let ns = xml as NSString
-        guard let startRe = try? NSRegularExpression(pattern: "<navPoint[^>]*>") else { return [] }
-        let matches = startRe.matches(in: xml, range: NSRange(location: 0, length: ns.length))
-        for m in matches {
-            let bodyStart = m.range.location + m.range.length
-            guard bodyStart < ns.length else { continue }
-            let remaining = ns.substring(from: bodyStart)
-            let closeRange = (remaining as NSString).range(of: "</navPoint>")
-            guard closeRange.location != NSNotFound else { continue }
-            let body   = (remaining as NSString).substring(to: closeRange.location)
+        // Only iterate top-level <navPoint>…</navPoint> pairs at this level.
+        // Children are handled by recursing into each one's body.
+        for body in topLevelTagBodies("navPoint", in: xml) {
             let bodyNS = body as NSString
-
             guard let textM = (try? NSRegularExpression(pattern: "<text>([^<]+)</text>"))?
                                 .firstMatch(in: body, range: NSRange(location: 0, length: bodyNS.length)),
                   let srcM  = (try? NSRegularExpression(pattern: "src=\"([^\"]+)\""))?
@@ -749,13 +958,155 @@ class EPUBParser {
             else { continue }
 
             let title  = bodyNS.substring(with: textM.range(at: 1)).trimmingCharacters(in: .whitespacesAndNewlines)
-            var rawSrc = bodyNS.substring(with: srcM.range(at: 1))
-            if let hash = rawSrc.firstIndex(of: "#") { rawSrc = String(rawSrc[..<hash]) }
+            // Keep full src (including any #fragment). Stripping collapses
+            // multiple books that share the same file into a single href,
+            // which breaks TOC highlight and intra-file navigation.
+            let rawSrc = bodyNS.substring(with: srcM.range(at: 1))
             let href   = base.isEmpty ? rawSrc : "\(base)/\(rawSrc)"
             var item   = TOCItem(title: title, href: href)
-            if body.contains("<navPoint") { item.children = parseNavPoints(body, base: base) }
+            if body.contains("<navPoint") {
+                item.children = parseNavPoints(body, base: base)
+            }
             items.append(item)
         }
         return items
+    }
+
+    // MARK: - Synthesize chapter children from in-page anchor links
+    //
+    // For TOCs that are flat at the top level (typical of Bibles where the publisher
+    // only lists 66 books and puts chapter links inline at the top of each book's
+    // first page), this scans each book's content for anchor links that look like
+    // chapter markers and turns them into nested children.
+    //
+    // Safety rules: never replaces children that already exist; never adds children
+    // unless we find at least 3 chapter-like anchors (avoids polluting non-Bible EPUBs
+    // whose first pages happen to contain stray links).
+
+    private static func synthesizeChildrenFromContent(toc: [TOCItem], archive: Archive) -> [TOCItem] {
+        guard !toc.isEmpty else {
+            print("[TOC-Synth] TOC is empty, skipping")
+            return toc
+        }
+
+        // If ANY entry already has nested children, the TOC is already structured —
+        // leave it alone.
+        if toc.contains(where: { !$0.children.isEmpty }) {
+            print("[TOC-Synth] TOC already nested, skipping")
+            return toc
+        }
+
+        print("[TOC-Synth] Flat TOC with \(toc.count) entries, attempting to synthesize children")
+
+        return toc.enumerated().map { idx, item -> TOCItem in
+            var updated = item
+            let anchors = extractChapterAnchors(href: item.href, archive: archive, entryIndex: idx, title: item.title)
+            if anchors.count >= 3 {
+                print("[TOC-Synth] ✓ \(item.title): added \(anchors.count) chapter children")
+                updated.children = anchors.map { (label, fragment) in
+                    TOCItem(title: label, href: item.href, fragment: fragment)
+                }
+            } else {
+                print("[TOC-Synth] ✗ \(item.title): only found \(anchors.count) chapter-like anchors")
+            }
+            return updated
+        }
+    }
+
+    private static func extractChapterAnchors(href: String, archive: Archive, entryIndex: Int = 0, title: String = "") -> [(label: String, fragment: String)] {
+        guard let data = read(href, from: archive),
+              let html = String(data: data, encoding: .utf8)
+                      ?? String(data: data, encoding: .isoLatin1)
+        else {
+            print("[TOC-Synth]   [\(title)] could not read content at \(href)")
+            return []
+        }
+
+        // Look only at the first ~12 KB — chapter navigation is invariably at the
+        // top of the page, and parsing the whole book file is unnecessary.
+        let scanLimit = min(html.count, 12_000)
+        let head      = String(html.prefix(scanLimit))
+
+        // For the first entry, print a sample of what the HTML actually looks like
+        // so we can see what patterns the chapter links use.
+        if entryIndex == 0 {
+            // Skip past the <head>...</head> so we see content, not metadata
+            let bodyStart = head.range(of: "<body", options: .caseInsensitive)?.upperBound ?? head.startIndex
+            let sample = String(head[bodyStart...].prefix(2500))
+            print("[TOC-Synth]   [\(title)] HTML sample (after <body>):\n\(sample)\n[TOC-Synth]   -- end sample --")
+        }
+
+        // Pull every anchor that points to a fragment (#anchor or file#anchor) along
+        // with its visible text.
+        guard let aRe = try? NSRegularExpression(
+            pattern: "<a[^>]+href=\"([^\"]*#[^\"]+)\"[^>]*>([^<]+)</a>",
+            options: [.caseInsensitive]
+        ) else { return [] }
+
+        // Also count TOTAL anchors (not just fragment-pointing ones) so we can diagnose
+        // whether chapters point to separate files rather than in-page anchors.
+        if let anyARe = try? NSRegularExpression(pattern: "<a[^>]+href=\"([^\"]+)\"[^>]*>([^<]*)</a>",
+                                                 options: [.caseInsensitive]) {
+            let allMatches = anyARe.matches(in: head, range: NSRange(location: 0, length: (head as NSString).length))
+            if entryIndex == 0 {
+                print("[TOC-Synth]   [\(title)] total anchor tags in first 12KB: \(allMatches.count)")
+                // Show the first 10 anchors so we can see what they look like
+                let nsHead = head as NSString
+                for (i, m) in allMatches.prefix(10).enumerated() {
+                    let hrefStr = nsHead.substring(with: m.range(at: 1))
+                    let textStr = nsHead.substring(with: m.range(at: 2)).trimmingCharacters(in: .whitespacesAndNewlines)
+                    print("[TOC-Synth]     anchor \(i): href=\"\(hrefStr)\" text=\"\(textStr)\"")
+                }
+            }
+        }
+
+        var seen:    Set<String>                       = []
+        var results: [(label: String, fragment: String)] = []
+        let ns       = head as NSString
+        aRe.enumerateMatches(in: head, range: NSRange(location: 0, length: ns.length)) { m, _, _ in
+            guard let m = m else { return }
+            let rawHref = ns.substring(with: m.range(at: 1))
+            let rawText = ns.substring(with: m.range(at: 2))
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .replacingOccurrences(of: "&nbsp;", with: " ")
+                .replacingOccurrences(of: "&amp;",  with: "&")
+
+            // Extract the fragment portion only (after #).
+            guard let hashIdx = rawHref.firstIndex(of: "#") else { return }
+            let fragment = String(rawHref[rawHref.index(after: hashIdx)...])
+            guard !fragment.isEmpty, !seen.contains(fragment) else { return }
+
+            // Filter for chapter-like text:
+            //   - purely numeric ("1", "23", "150")
+            //   - "Chapter N", "Ch N", "Ch. N"
+            //   - Roman numerals up to 4 chars ("IV", "XII")
+            // Anything else (footnote refs, cross-refs, copyright) is skipped.
+            let label: String
+            if rawText.allSatisfy({ $0.isNumber }), !rawText.isEmpty {
+                label = "Chapter \(rawText)"
+            } else if rawText.range(of: #"^(Chapter|Ch\.?|CHAPTER)\s*\d+$"#,
+                                    options: [.regularExpression]) != nil {
+                label = rawText
+            } else if rawText.count <= 4,
+                      rawText.allSatisfy({ "IVXLCDMivxlcdm".contains($0) }) {
+                label = "Chapter \(rawText.uppercased())"
+            } else {
+                return
+            }
+
+            seen.insert(fragment)
+            results.append((label, fragment))
+            // Sanity cap — Bible books top out at 150 chapters (Psalms).
+            if results.count >= 200 { return }
+        }
+        return results
+    }
+}
+
+// Small NSRange convenience used by the depth-aware HTML helpers above.
+// Returns nil when the range wasn't found, saving a NSNotFound guard at callsites.
+private extension NSRange {
+    var upperBoundOrNil: Int? {
+        location == NSNotFound ? nil : location + length
     }
 }

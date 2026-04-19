@@ -37,7 +37,7 @@ struct DictionaryView: View {
                         }
                     }
                     .padding(10)
-                    .onChange(of: selectedDictionary) { _ in triggerSearch() }
+                    .onChange(of: selectedDictionary) { triggerSearch() }
                     .onAppear { selectedDictionary = dictionaries.first }
                     .onAppear { startClipboardMonitor() }
                     .onDisappear { stopClipboardMonitor() }
@@ -48,7 +48,7 @@ struct DictionaryView: View {
                     Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
                     TextField("Search topics…", text: $searchText)
                         .textFieldStyle(.plain)
-                        .onChange(of: searchText) { _ in triggerSearch() }
+                        .onChange(of: searchText) { triggerSearch() }
                     if !searchText.isEmpty {
                         Button { searchText = "" } label: {
                             Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)

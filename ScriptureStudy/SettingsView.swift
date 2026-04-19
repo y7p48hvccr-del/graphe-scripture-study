@@ -69,7 +69,7 @@ struct SettingsView: View {
     @AppStorage("showGestureHints")    private var showGestureHints:    Bool   = true
     @AppStorage("showStatusHints")     private var showStatusHints:     Bool   = true
     @AppStorage("showOnboardingAgain") private var showOnboardingAgain: Bool   = true
-    @AppStorage("autoSummaryEnabled")  private var autoSummaryEnabled:  Bool   = true
+    @AppStorage("autoSummaryEnabled")  private var autoSummaryEnabled:  Bool   = false
     @AppStorage("showGlossNotes")      private var showGlossNotes:      Bool   = true
     @AppStorage("strongsOnlyFilter")   private var strongsOnly:          Bool   = false
     @AppStorage("showLaunchAnimation") private var showLaunchAnimation: Bool   = true
@@ -270,14 +270,14 @@ struct SettingsView: View {
                 .shadow(color: .black.opacity(0.3), radius: 3, x: 0, y: 2)
 
                 VStack(alignment: .leading, spacing: 1) {
-                    Text("Graphē")
+                    Text("Graphē One")
                         .font(.custom("Baskerville", size: 24))
                         .fontWeight(.semibold)
                         .foregroundStyle(themeID == "charcoal"
                             ? Color(red: 0.45, green: 0.58, blue: 0.45)
                             : Color(red: 0.18, green: 0.32, blue: 0.18))
                         .fixedSize()
-                    Text("ScriptureStudy Pro™")
+                    Text("Graphē One ScriptureStudy Pro™")
                         .font(.custom("Baskerville", size: 16))
                         .foregroundStyle(themeID == "charcoal"
                             ? Color(red: 0.45, green: 0.58, blue: 0.45).opacity(0.70)
@@ -526,19 +526,11 @@ struct SettingsView: View {
                 Text("When enabled, a summary is automatically generated each time you load a chapter in the Bible tab.")
                     .font(.caption).foregroundStyle(.secondary)
                 Toggle("Show logo animation on launch", isOn: $showLaunchAnimation)
-                Text("Displays the Graphē logo with a pulse animation each time the app opens.")
+                Text("Displays the Graphē One logo with a pulse animation each time the app opens.")
                     .font(.caption).foregroundStyle(.secondary)
                 Toggle("Show translation gloss notes", isOn: $showGlossNotes)
                 Text("Shows a small indicator on verses that contain translator's notes. Tap it to see the original language gloss.")
                     .font(.caption).foregroundStyle(.secondary)
-                Toggle(isOn: $detectScriptureRefs) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Enrich book text with interactive links").font(.body)
-                        Text("Detects Bible references (e.g. John 3:16) in your books and makes them tappable, opening directly in the Bible tab. May slow page loading on long chapters.")
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
-                }
-                .onChange(of: detectScriptureRefs) { _ in EPUBParser.invalidateCache() }
             }
 
             sectionDivider
@@ -641,13 +633,23 @@ struct SettingsView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }.padding(.vertical, 4)
 
-                Toggle(isOn: $preCacheEpubPages) {
+                Toggle(isOn: .constant(false)) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Pre-process books for faster re-reading").font(.body)
-                        Text("Processes each page on first open and caches the result.")
+                        Text("Enrich book text with interactive links").font(.body)
+                        Text("Coming in a future update — will detect Bible references in your books and make them tappable.")
                             .font(.caption).foregroundStyle(.secondary)
                     }
                 }
+                .disabled(true)
+
+                Toggle(isOn: .constant(false)) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Pre-process books for faster re-reading").font(.body)
+                        Text("Coming in a future update — will process each page on first open and cache the result.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                .disabled(true)
             } header: {
                 Text("Advanced — Book Reader")
             }

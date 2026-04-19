@@ -45,7 +45,7 @@ struct CommentaryView: View {
                         .onAppear {
                             if selectedCommentary == nil { selectedCommentary = commentaries.first }
                         }
-                        .onChange(of: selectedCommentary) { _ in
+                        .onChange(of: selectedCommentary) {
                             guard !isNavigating else { return }
                             Task { await loadCommentary() }
                         }
@@ -59,7 +59,7 @@ struct CommentaryView: View {
                             }
                         }
                         .labelsHidden()
-                        .onChange(of: selectedBookNumber) { _ in
+                        .onChange(of: selectedBookNumber) {
                             guard !isNavigating else { return }
                             Task { await loadCommentary() }
                         }
@@ -73,7 +73,7 @@ struct CommentaryView: View {
                             }
                         }
                         .labelsHidden()
-                        .onChange(of: selectedChapter) { _ in
+                        .onChange(of: selectedChapter) {
                             guard !isNavigating else { return }
                             Task { await loadCommentary() }
                         }

@@ -16,6 +16,7 @@ struct ModuleLibraryView: View {
     @State private var searchMode:       String  = "modules"  // "modules" or "languages"
     @State private var moduleMetadata:   [String: String] = [:]
     @State private var selectedTab:      String  = "All"
+    @State private var refreshRotation:  Double  = 0
     @AppStorage("defaultLanguage") private var selectedLanguage: String  = "all"
     @AppStorage("defaultRegion")   private var selectedRegion:   String  = "Major Languages"
     @AppStorage("pinnedLanguages") private var pinnedLanguagesRaw: String = ""
@@ -45,7 +46,6 @@ struct ModuleLibraryView: View {
     var encyclopediaMods: [MyBibleModule] { myBible.modules.filter { $0.type == .encyclopedia } }
     var strongsMods:  [MyBibleModule] { myBible.modules.filter { $0.type == .strongs } }
     var readingPlans: [MyBibleModule] { myBible.modules.filter { $0.type == .readingPlan } }
-    var atlasMods:    [MyBibleModule] { myBible.modules.filter { $0.type == .atlas } }
     var others:       [MyBibleModule] { myBible.modules.filter { $0.type == .unknown || $0.type == .subheadings || $0.type == .wordIndex } }
     var favourites:   [MyBibleModule] { myBible.modules.filter { !myBible.hiddenModules.contains($0.filePath) } }
 
@@ -213,9 +213,25 @@ struct ModuleLibraryView: View {
                 .disabled(myBible.modulesFolder.isEmpty)
             }
             ToolbarItem {
-                Button { Task { await myBible.scanModules() } } label: {
-                    Label("Refresh", systemImage: "arrow.clockwise")
+                Button {
+                    Task {
+                        await myBible.scanModules()
+                    }
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                        .rotationEffect(.degrees(myBible.isLoading ? refreshRotation : 0))
+                        .animation(myBible.isLoading ?
+                            .linear(duration: 0.8).repeatForever(autoreverses: false) :
+                            .default, value: refreshRotation)
                 }
+                .onChange(of: myBible.isLoading) { _, loading in
+                    if loading {
+                        refreshRotation = 360
+                    } else {
+                        refreshRotation = 0
+                    }
+                }
+                .help("Refresh modules")
             }
         }
         .overlay(alignment: .bottom) {
@@ -300,7 +316,6 @@ struct ModuleLibraryView: View {
             ("Commentaries",     commentaries),
             ("Cross-References", crossRefMods),
             ("Devotionals",      devotionals),
-            ("Bible Maps",       atlasMods),
             ("Dictionaries",     dictMods),
             ("Encyclopedias",    encyclopediaMods),
             ("Lexicons",         strongsMods),
@@ -321,7 +336,6 @@ struct ModuleLibraryView: View {
         case "Commentaries":     return filtered(commentaries)
         case "Cross-References": return filtered(crossRefMods)
         case "Devotionals":      return filtered(devotionals)
-        case "Bible Maps":        return filtered(atlasMods)
         case "Dictionaries":     return filtered(dictMods)
         case "Encyclopedias":    return filtered(encyclopediaMods)
         case "Lexicons":         return filtered(strongsMods)
@@ -349,7 +363,7 @@ struct ModuleLibraryView: View {
             // Sync language selection from persisted filter
             selectedLanguage = myBible.selectedLanguageFilter
         }
-        .onChange(of: myBible.metadataBlobs) { newBlobs in moduleMetadata = newBlobs }
+        .onChange(of: myBible.metadataBlobs) { _, newBlobs in moduleMetadata = newBlobs }
     }
 
     // MARK: - Side panel
@@ -440,7 +454,7 @@ struct ModuleLibraryView: View {
                     }
                     .pickerStyle(.menu)
                     .font(.system(size: 11))
-                    .onChange(of: selectedRegion) { _ in selectedLanguage = "all" }
+                    .onChange(of: selectedRegion) { selectedLanguage = "all" }
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 10)
@@ -610,21 +624,23 @@ struct ModuleLibraryView: View {
                 onToggleVisibility: { myBible.toggleHidden(module) },
                 onDelete: { deleteModule(module) }
             )
+        case .commentary:
+            DictionaryModuleRow(
+                module: module,
+                isCrossRef: false, isStrongs: false,
+                isDict: myBible.selectedCommentary?.filePath == module.filePath,
+                isHidden: myBible.hiddenModules.contains(module.filePath),
+                onSetCrossRef: {}, onSetStrongs: {},
+                onSetDictionary: { myBible.selectedCommentary = module },
+                onToggleVisibility: { myBible.toggleHidden(module) },
+                onDelete: { deleteModule(module) }
+            )
         case .devotional:
             ModuleRow(
                 module: module,
                 isSelected: myBible.selectedDevotional?.filePath == module.filePath,
                 isHidden: myBible.hiddenModules.contains(module.filePath),
                 onSelect: { myBible.selectedDevotional = module },
-                onToggleVisibility: { myBible.toggleHidden(module) },
-                onDelete: { deleteModule(module) }
-            )
-        case .atlas:
-            ModuleRow(
-                module: module,
-                isSelected: false,
-                isHidden: myBible.hiddenModules.contains(module.filePath),
-                onSelect: {},
                 onToggleVisibility: { myBible.toggleHidden(module) },
                 onDelete: { deleteModule(module) }
             )
@@ -1048,6 +1064,12 @@ struct DictionaryModuleRow: View {
                 }
                 if module.type == .dictionary {
                     Button("Default Dictionary module") { onSetDictionary() }
+                }
+                if module.type == .encyclopedia {
+                    Button("Default Encyclopedia module") { onSetDictionary() }
+                }
+                if module.type == .commentary {
+                    Button("Default Commentary module") { onSetDictionary() }
                 }
             }
             .font(.caption).controlSize(.small).buttonStyle(.bordered)

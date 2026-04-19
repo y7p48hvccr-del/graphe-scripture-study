@@ -50,26 +50,21 @@ struct ContentView: View {
                     ZStack { SettingsView() }
                         .tabItem { Label("Settings",    systemImage: "gearshape.fill") }.tag(7)
                 }
-                .onReceive(NotificationCenter.default.publisher(for: .navigateToPassage)) { _ in
-                    selectedTab = 0
+                .onReceive(NotificationCenter.default.publisher(for: .navigateToPassage)) { _ in selectedTab = 0
                 }
-                .onReceive(NotificationCenter.default.publisher(for: .navigateToCommentary)) { _ in
-                    selectedTab = 1
+                .onReceive(NotificationCenter.default.publisher(for: .navigateToCommentary)) { _ in selectedTab = 1
                 }
-                .onChange(of: selectedTab) { newTab in
+                .onChange(of: selectedTab) { _, newTab in
                     // Auto-delete empty note when navigating away from Organizer tab
                     if newTab != 4, let note = notesManager.selectedNote {
                         notesManager.deleteIfEmpty(note)
                     }
                 }
-                .onReceive(NotificationCenter.default.publisher(for: Notification.Name("switchToNotesTab"))) { _ in
-                    selectedTab = 4
+                .onReceive(NotificationCenter.default.publisher(for: Notification.Name("switchToNotesTab"))) { _ in selectedTab = 4
                 }
-                .onReceive(NotificationCenter.default.publisher(for: Notification.Name("noteCreatedFromVerse"))) { _ in
-                    selectedTab = 4
+                .onReceive(NotificationCenter.default.publisher(for: Notification.Name("noteCreatedFromVerse"))) { _ in selectedTab = 4
                 }
-                .onReceive(NotificationCenter.default.publisher(for: Notification.Name("switchToLibraryTab"))) { _ in
-                    selectedTab = 6
+                .onReceive(NotificationCenter.default.publisher(for: Notification.Name("switchToLibraryTab"))) { _ in selectedTab = 6
                 }
                 .onAppear {
                     selectedTab = 0  // Always open on Bible tab
@@ -79,17 +74,19 @@ struct ContentView: View {
                     bmapsService.loadIfNeeded()
                     interlinearService.loadIfNeeded()
                     if !hasSeenOnboarding || showOnboardingAgain {
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                            showingOnboarding = true
-                        }
+                        showingOnboarding = true
                     }
                 }
                 #if os(macOS)
-                .onChange(of: themeID) { _ in applyWindowBackground() }
+                .onChange(of: themeID) { applyWindowBackground() }
                 #endif
             }
         }
         .tint(filigreeAccent)
+        .onAppear {
+            bmapsService.loadIfNeeded()
+            interlinearService.loadIfNeeded()
+        }
         .environmentObject(bmapsService)
         .environmentObject(interlinearService)
         .background(theme.background.ignoresSafeArea())
@@ -160,7 +157,7 @@ struct SummaryStatusStrip: View {
                 .transition(.move(edge: .top).combined(with: .opacity))
                 .animation(.easeInOut(duration: 0.2), value: ollama.summaryIsLoading)
                 // Trigger 4 pulses when summary becomes ready
-                .onChange(of: ollama.summaryReady) { ready in
+                .onChange(of: ollama.summaryReady) { _, ready in
                     if ready { startPulses() }
                 }
             }

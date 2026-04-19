@@ -70,7 +70,7 @@ struct OrganizerView: View {
                 organizerNote = noteObj
             }
         }
-        .onChange(of: notesManager.selectedNote) { note in
+        .onChange(of: notesManager.selectedNote) { _, note in
             // When a note is newly created (selectedNote changes), update organizer editor
             if let note = note, organizerNote == nil || note.id != organizerNote?.id {
                 // Only show notes that were created from a verse (have book reference)
@@ -106,13 +106,8 @@ struct OrganizerView: View {
             }
             .buttonStyle(.plain)
 
-            // "I'm organised!" + month title
+            // Month title
             HStack(spacing: 8) {
-                Text("I'm organised!")
-                    .font(.system(size: 11, weight: .semibold))
-                    .italic()
-                    .foregroundStyle(calRed.opacity(0.7))
-                    .fixedSize()
                 Text(monthTitle)
                     .font(.system(size: 18, weight: .bold))
                     .foregroundStyle(.black)
@@ -363,8 +358,7 @@ struct OrganizerView: View {
                     onTextChange: { val in
                         var u = note; u.content = val
                         organizerSaveTimer?.invalidate()
-                        organizerSaveTimer = Timer.scheduledTimer(withTimeInterval: 0.8, repeats: false) { _ in
-                            Task { @MainActor in self.notesManager.save(u) }
+                        organizerSaveTimer = Timer.scheduledTimer(withTimeInterval: 0.8, repeats: false) { _ in Task { @MainActor in self.notesManager.save(u) }
                         }
                     },
                     fontSize:    16,

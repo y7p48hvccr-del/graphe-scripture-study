@@ -71,7 +71,7 @@ struct SearchView: View {
             TextField("Search… use \"quotes\" for exact phrases", text: $query)
                 .textFieldStyle(.plain)
                 .onSubmit { runSearch() }
-                .onChange(of: query) { _ in scheduleSearch() }
+                .onChange(of: query) { scheduleSearch() }
             if !query.isEmpty {
                 Button { query = ""; results = [] } label: {
                     Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
@@ -100,7 +100,7 @@ struct SearchView: View {
         .tint(filigreeAccentFill)
         .padding(.horizontal, 14).padding(.vertical, 8)
         .background(theme.background)
-        .onChange(of: scope) { _ in runSearch() }
+        .onChange(of: scope) { runSearch() }
     }
 
     // MARK: - Filter panel

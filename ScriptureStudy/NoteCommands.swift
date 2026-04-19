@@ -10,7 +10,7 @@ struct NoteCommands: Commands {
         // Help menu
         CommandGroup(replacing: .help) {
             #if os(macOS)
-            Button("ScriptureStudy Help") {
+            Button("Graphē One Help") {
                 HelpWindowController.shared.show()
             }
             .keyboardShortcut("/", modifiers: .command)
