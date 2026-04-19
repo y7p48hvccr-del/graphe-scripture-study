@@ -5,6 +5,7 @@ A running record of architectural and product decisions. Add entries as decision
 Format: `YYYY-MM-DD · Topic · Decision · Rationale`
 
 ---
+TEST
 ## 2026-04-19 · Interlinear parser: support all 18 modules
 
 **Decision:** Replace the two format-specific parsers in `InterlinearService.swift` (`parseNT` hardcoded to the iESVTH format, `parseOT` hardcoded to IHOT) with a single unified parser that handles the eight distinct markup conventions found across the 18 interlinear modules in the library.
