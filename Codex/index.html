@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Graphē One Codex — Studio Graphē One</title>
+    <meta name="description" content="Graphē One Codex is a professional reading environment for structured texts, EPUBs, and PDFs.">
+    <style>
+        :root {
+            --bg: #eef2f7;
+            --surface: #f7f9fc;
+            --ink: #28385e;
+            --muted: #55637d;
+            --accent: #a58540;
+            --border: rgba(40, 56, 94, 0.12);
+        }
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            font-family: Georgia, "Times New Roman", serif;
+            background: linear-gradient(180deg, #f7f9fc 0%, #edf2f8 100%);
+            color: var(--ink);
+            line-height: 1.6;
+        }
+        a { color: var(--ink); text-decoration: none; }
+        a:hover { text-decoration: underline; }
+        .wrap { width: min(1040px, calc(100% - 40px)); margin: 0 auto; }
+        header {
+            padding: 24px 0;
+            border-bottom: 1px solid var(--border);
+            background: rgba(247, 249, 252, 0.88);
+            backdrop-filter: blur(10px);
+        }
+        nav {
+            display: flex;
+            justify-content: space-between;
+            gap: 16px;
+            align-items: center;
+        }
+        nav .links {
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            font-size: 0.95rem;
+        }
+        .hero {
+            padding: 88px 0 72px;
+        }
+        .eyebrow {
+            margin: 0 0 10px;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            text-transform: uppercase;
+            letter-spacing: 0.12em;
+            font-size: 0.78rem;
+            color: var(--muted);
+        }
+        h1, h2 {
+            margin: 0 0 14px;
+            font-weight: 500;
+            line-height: 1.1;
+        }
+        h1 { font-size: clamp(2.8rem, 7vw, 4.6rem); }
+        h2 { font-size: clamp(2rem, 4vw, 2.8rem); }
+        .hero p,
+        .section-intro,
+        .availability,
+        footer {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        }
+        .hero p {
+            width: min(720px, 100%);
+            margin: 0 0 26px;
+            font-size: 1.08rem;
+            color: var(--muted);
+        }
+        .actions {
+            display: flex;
+            gap: 14px;
+            flex-wrap: wrap;
+        }
+        .button {
+            display: inline-block;
+            padding: 12px 18px;
+            border-radius: 999px;
+            border: 1px solid var(--border);
+            background: var(--surface);
+        }
+        .button.primary {
+            background: var(--accent);
+            border-color: var(--accent);
+            color: white;
+        }
+        section { padding: 28px 0 42px; }
+        .section-intro {
+            margin: 0 0 28px;
+            color: var(--muted);
+            max-width: 760px;
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+            gap: 18px;
+        }
+        .card {
+            padding: 22px;
+            border-radius: 22px;
+            border: 1px solid var(--border);
+            background: rgba(247, 249, 252, 0.82);
+            box-shadow: 0 10px 30px rgba(31, 47, 82, 0.05);
+        }
+        .card h3 {
+            margin: 0 0 10px;
+            font-size: 1.15rem;
+            font-weight: 500;
+        }
+        .card p,
+        .availability,
+        footer {
+            margin: 0;
+            color: var(--muted);
+        }
+        .tier-cta {
+            margin-top: 28px;
+        }
+        .screens {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 16px;
+        }
+        .shot {
+            min-height: 220px;
+            border-radius: 24px;
+            border: 1px dashed var(--border);
+            background: rgba(255, 255, 255, 0.48);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            padding: 18px;
+            color: var(--muted);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        }
+        footer {
+            padding: 36px 0 54px;
+            border-top: 1px solid var(--border);
+            margin-top: 24px;
+        }
+        footer .links {
+            display: flex;
+            gap: 18px;
+            flex-wrap: wrap;
+            margin-bottom: 10px;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="wrap">
+            <nav>
+                <a href="https://graphe.one/">Studio Graphē One</a>
+                <div class="links">
+                    <a href="./pricing.html">Pricing</a>
+                    <a href="./support.html">Support</a>
+                    <a href="./privacy.html">Privacy</a>
+                    <a href="mailto:support@graphe.one">Contact</a>
+                </div>
+            </nav>
+        </div>
+    </header>
+
+    <main class="wrap">
+        <section class="hero">
+            <p class="eyebrow">Studio Graphē One</p>
+            <h1>Graphē One Codex</h1>
+            <p>A professional reading environment for structured texts, EPUBs, and PDFs. Built for deep reading, large libraries, and precise navigation across complex works.</p>
+            <div class="actions">
+                <a class="button" href="./pricing.html">Pricing</a>
+                <a class="button primary" href="./support.html">Get Support</a>
+                <a class="button" href="./privacy.html">Privacy Policy</a>
+            </div>
+        </section>
+
+        <section>
+            <h2>Built for serious reading.</h2>
+            <p class="section-intro">Graphē One Codex is designed for readers who need more than a simple file viewer. It brings structured texts, EPUB documents, and PDF documents into one coherent reading environment, with long-form reading, durable navigation, and large-document handling in mind.</p>
+            <div class="grid">
+                <article class="card">
+                    <h3>Structured Text Reading</h3>
+                    <p>Navigate works through sections, subsections, and passage-aware layouts rather than flat page flow alone.</p>
+                </article>
+                <article class="card">
+                    <h3>EPUB and PDF Support</h3>
+                    <p>Bring imported publications into the same library alongside native structured texts.</p>
+                </article>
+                <article class="card">
+                    <h3>Persistent Library</h3>
+                    <p>Your documents, bookmarks, and reading position remain available across sessions.</p>
+                </article>
+                <article class="card">
+                    <h3>Long-Document Navigation</h3>
+                    <p>Prepared for dense internal structure, nested contents, linked references, and metadata-rich reading.</p>
+                </article>
+                <article class="card">
+                    <h3>Cross-Platform Direction</h3>
+                    <p>Designed with iPhone, iPad, and Mac in mind, with cloud-connected workflows planned.</p>
+                </article>
+                <article class="card">
+                    <h3>Privacy-First Foundations</h3>
+                    <p>Built around local-first reading, durable state, and a high-trust approach to personal libraries.</p>
+                </article>
+            </div>
+        </section>
+
+        <section>
+            <h2>Choose Your Level</h2>
+            <p class="section-intro">Codex is available in three levels, from a focused core reader to deeper reference tools and advanced professional workflows.</p>
+            <div class="grid">
+                <article class="card">
+                    <h3>Codex Core</h3>
+                    <p>A serious reading environment for EPUBs, PDFs, and structured texts.</p>
+                </article>
+                <article class="card">
+                    <h3>Codex Reference</h3>
+                    <p>Deeper annotation, reference, and linked-reading tools for complex works.</p>
+                </article>
+                <article class="card">
+                    <h3>Codex Professional</h3>
+                    <p>Advanced research and large-document workflows for professional and institutional reading.</p>
+                </article>
+            </div>
+            <div class="actions tier-cta">
+                <a class="button primary" href="./pricing.html">View Pricing</a>
+            </div>
+        </section>
+
+        <section>
+            <h2>Reading Surfaces</h2>
+            <p class="section-intro">Graphē One Codex is being shaped as a first-class reading experience across Apple platforms, not as a desktop app reluctantly adapted later.</p>
+            <div class="screens">
+                <div class="shot">iPhone<br>Compact reading surface</div>
+                <div class="shot">iPad<br>Full reading shell</div>
+                <div class="shot">Mac<br>Library and document workspace</div>
+            </div>
+        </section>
+
+        <section>
+            <h2>Availability</h2>
+            <p class="availability">Coming to the App Store.</p>
+        </section>
+    </main>
+
+    <footer>
+        <div class="wrap">
+            <div class="links">
+                <a href="https://graphe.one/">Home</a>
+                <a href="./pricing.html">Pricing</a>
+                <a href="./support.html">Support</a>
+                <a href="./privacy.html">Privacy Policy</a>
+            </div>
+            <div>© 2026 Studio Graphē One</div>
+        </div>
+    </footer>
+</body>
+</html>
