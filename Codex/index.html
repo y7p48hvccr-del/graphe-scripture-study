@@ -13,16 +13,16 @@
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,500;0,600;1,400;1,500&display=swap" rel="stylesheet">
 <style>
   :root {
-    --bg: #C9D7E4;              /* Graphē One sky blue — matches splash */
-    --bg-soft: #D5DFEA;          /* slightly lighter blue for alt sections */
-    --bg-alt: #BFD0DF;           /* slightly deeper blue for contrast bands */
-    --bg-card: #ffffff;          /* white cards to lift off the blue */
-    --text: #1d1d1f;             /* near-black primary text */
-    --text-soft: #4a5863;        /* blue-slate for secondary text */
-    --text-faint: #6e7d8a;       /* lighter muted text */
-    --accent: #1d1d1f;           /* generic CTA colour */
-    --gold: #B8944E;             /* brownie gold — Graphē mark + primary CTA */
-    --gold-deep: #9E7D3F;        /* gold hover state */
+    --bg: #C9D7E4;
+    --bg-soft: #D5DFEA;
+    --bg-alt: #BFD0DF;
+    --bg-card: #ffffff;
+    --text: #1d1d1f;
+    --text-soft: #4a5863;
+    --text-faint: #6e7d8a;
+    --accent: #1d1d1f;
+    --gold: #B8944E;
+    --gold-deep: #9E7D3F;
     --link: #0066cc;
     --border: rgba(29, 41, 57, 0.14);
     --border-soft: rgba(29, 41, 57, 0.08);
@@ -30,19 +30,27 @@
     --radius: 14px;
     --serif: "Playfair Display", ui-serif, "New York", "Iowan Old Style", Georgia, "Times New Roman", serif;
     --sans: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Helvetica Neue", Helvetica, Arial, sans-serif;
-    .cta-link {
-  display: inline-block;
-  margin-top: 4px;
-  padding: 10px 16px;
-  border-radius: 999px;
-  border: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.72);
-  color: var(--text);
-  font-family: var(--sans);
-  font-size: 0.95rem;
-  font-weight: 500;
-  text-decoration: none;
-}
+  }
+
+  .cta-link {
+    display: inline-block;
+    margin-top: 4px;
+    padding: 10px 16px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: rgba(255, 255, 255, 0.72);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 0.95rem;
+    font-weight: 500;
+    text-decoration: none;
+  }
+
+  .cta-link:hover {
+    background: rgba(255, 255, 255, 0.9);
+    text-decoration: none;
+  }
+</style>
 
 .cta-link:hover {
   background: rgba(255, 255, 255, 0.9);
