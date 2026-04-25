@@ -1,68 +1,264 @@
-<p class="lede">Choose the level of Codex that fits your reading practice. Codex is designed as a high-trust reading environment for complex texts. Begin with a serious core reader, move into deeper reference and annotation tools when needed, and scale into advanced professional workflows over time.</p>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Pricing — Graphē One Codex</title>
+    <meta name="description" content="Pricing and plan overview for Graphē One Codex.">
+    <style>
+        :root {
+            --bg: #eef2f7;
+            --surface: #f7f9fc;
+            --surface-strong: rgba(247, 249, 252, 0.9);
+            --ink: #28385e;
+            --muted: #55637d;
+            --accent: #a58540;
+            --border: rgba(40, 56, 94, 0.12);
+        }
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            font-family: Georgia, "Times New Roman", serif;
+            background: linear-gradient(180deg, #f7f9fc 0%, #edf2f8 100%);
+            color: var(--ink);
+            line-height: 1.65;
+        }
+        a { color: var(--ink); text-decoration: none; }
+        a:hover { text-decoration: underline; }
+        .wrap { width: min(1040px, calc(100% - 40px)); margin: 0 auto; }
+        header {
+            padding: 24px 0;
+            border-bottom: 1px solid var(--border);
+            background: rgba(247, 249, 252, 0.88);
+            backdrop-filter: blur(10px);
+        }
+        nav {
+            display: flex;
+            justify-content: space-between;
+            gap: 16px;
+            align-items: center;
+        }
+        nav .links {
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            font-size: 0.95rem;
+        }
+        main {
+            padding: 72px 0 30px;
+        }
+        .eyebrow,
+        .lede,
+        .plan p,
+        .intro,
+        .note,
+        footer,
+        .comparison {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        }
+        .eyebrow {
+            margin: 0 0 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.12em;
+            font-size: 0.78rem;
+            color: var(--muted);
+        }
+        h1, h2, h3 {
+            margin: 0;
+            font-weight: 500;
+            line-height: 1.1;
+        }
+        h1 {
+            margin-bottom: 16px;
+            font-size: clamp(2.5rem, 6vw, 4rem);
+        }
+        h2 {
+            font-size: clamp(1.8rem, 4vw, 2.5rem);
+            margin-bottom: 14px;
+        }
+        h3 {
+            font-size: 1.35rem;
+            margin-bottom: 10px;
+        }
+        .lede {
+            margin: 0 0 44px;
+            max-width: 760px;
+            color: var(--muted);
+            font-size: 1.05rem;
+        }
+        .plans {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+            gap: 18px;
+            margin-bottom: 34px;
+        }
+        .plan {
+            padding: 24px;
+            border-radius: 24px;
+            border: 1px solid var(--border);
+            background: var(--surface-strong);
+            box-shadow: 0 12px 30px rgba(31, 47, 82, 0.06);
+        }
+        .plan.featured {
+            border-color: rgba(165, 133, 64, 0.35);
+            box-shadow: 0 16px 36px rgba(165, 133, 64, 0.08);
+        }
+        .plan p {
+            margin: 0 0 16px;
+            color: var(--muted);
+        }
+        ul {
+            margin: 0;
+            padding-left: 20px;
+            color: var(--muted);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        }
+        li + li {
+            margin-top: 8px;
+        }
+        .intro,
+        .note,
+        .comparison {
+            color: var(--muted);
+        }
+        .section {
+            padding: 12px 0 20px;
+        }
+        .callout {
+            margin-top: 30px;
+            padding: 22px;
+            border-radius: 22px;
+            border: 1px solid var(--border);
+            background: rgba(255, 255, 255, 0.45);
+        }
+        .cta-link {
+            display: inline-block;
+            margin-top: 4px;
+            padding: 10px 16px;
+            border-radius: 999px;
+            border: 1px solid rgba(40, 56, 94, 0.18);
+            background: rgba(255, 255, 255, 0.72);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            font-size: 0.95rem;
+            font-weight: 500;
+        }
+        .cta-link:hover {
+            text-decoration: none;
+            background: rgba(255, 255, 255, 0.9);
+        }
+        footer {
+            padding: 36px 0 54px;
+            border-top: 1px solid var(--border);
+            margin-top: 24px;
+            color: var(--muted);
+        }
+        footer .links {
+            display: flex;
+            gap: 18px;
+            flex-wrap: wrap;
+            margin-bottom: 10px;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="wrap">
+            <nav>
+                <a href="./index.html">Graphē One Codex</a>
+                <div class="links">
+                    <a href="./pricing.html">Pricing</a>
+                    <a href="./support.html">Support</a>
+                    <a href="./privacy.html">Privacy</a>
+                    <a href="https://graphe.one/">Studio Graphē One</a>
+                </div>
+            </nav>
+        </div>
+    </header>
 
-<section class="plans">
-    <article class="plan">
-        <h3>Codex Core</h3>
-        <p>A focused reading environment for EPUBs, PDFs, and structured texts.</p>
-        <ul>
-            <li>Persistent local-first library</li>
-            <li>Built-in reference texts included</li>
-            <li>EPUB and PDF import</li>
-            <li>Bookmarks and reading position</li>
-            <li>Structured navigation and contents</li>
-            <li>Offline reading</li>
-            <li>Privacy-first foundations</li>
-        </ul>
-        <p>Codex Core is intended to feel complete: a serious everyday reader for long-form and structured works.</p>
-    </article>
+    <main class="wrap">
+        <p class="eyebrow">Graphē One Codex</p>
+        <h1>Pricing</h1>
+        <p class="lede">Choose the level of Codex that fits your reading practice. Codex is designed as a high-trust reading environment for complex texts. Begin with a serious core reader, move into deeper reference and annotation tools when needed, and scale into advanced professional workflows over time.</p>
 
-    <article class="plan featured">
-        <h3>Codex Reference</h3>
-        <p>Deeper reference, annotation, and study tools for readers working across complex texts.</p>
-        <ul>
-            <li>Everything in Codex Core</li>
-            <li>Richer notes and highlights</li>
-            <li>Cross references and linked passages</li>
-            <li>Deeper navigation across large structured works</li>
-            <li>Reference overlays and contextual aids</li>
-            <li>Advanced bookmarking and reading trails</li>
-            <li>Text comparison tools</li>
-            <li>Expanded study and reference workflows</li>
-        </ul>
-        <p>Especially useful for readers working with reference texts, legal material, technical documents, long-form scholarly works, richly structured documents, and exegesis.</p>
-    </article>
+        <section class="plans">
+            <article class="plan">
+                <h3>Codex Core</h3>
+                <p>A focused reading environment for EPUBs, PDFs, and structured texts.</p>
+                <ul>
+                    <li>Persistent local-first library</li>
+                    <li>Built-in reference texts included</li>
+                    <li>EPUB and PDF import</li>
+                    <li>Bookmarks and reading position</li>
+                    <li>Structured navigation and contents</li>
+                    <li>Offline reading</li>
+                    <li>Privacy-first foundations</li>
+                </ul>
+                <p>Codex Core is intended to feel complete: a serious everyday reader for long-form and structured works.</p>
+            </article>
 
-    <article class="plan">
-        <h3>Codex Professional</h3>
-        <p>Advanced research and professional reading workflows for large, demanding document collections.</p>
-        <ul>
-            <li>Everything in lower tiers</li>
-            <li>Advanced annotation system</li>
-            <li>Notes, tags, notebooks, and research collections</li>
-            <li>Cross-document linking</li>
-            <li>Parallel and comparative reading</li>
-            <li>Advanced search across the library</li>
-            <li>Citation, excerpt, and export tools</li>
-            <li>Structured navigation for very large works</li>
-            <li>Richer sync for workspaces and metadata</li>
-            <li>Professional workflows for legal, academic, technical, governmental, and institutional reading</li>
-        </ul>
-        <p>Codex Professional is in active development. Register interest to receive updates on progress, availability, and professional or institutional access.</p>
-        <p><a class="cta-link" href="mailto:professional@graphe.one?subject=Codex%20Professional%20Interest">Register Interest</a></p>
-    </article>
-</section>
+            <article class="plan featured">
+                <h3>Codex Reference</h3>
+                <p>Deeper reference, annotation, and study tools for readers working across complex texts.</p>
+                <ul>
+                    <li>Everything in Codex Core</li>
+                    <li>Richer notes and highlights</li>
+                    <li>Cross references and linked passages</li>
+                    <li>Deeper navigation across large structured works</li>
+                    <li>Reference overlays and contextual aids</li>
+                    <li>Advanced bookmarking and reading trails</li>
+                    <li>Text comparison tools</li>
+                    <li>Expanded study and reference workflows</li>
+                </ul>
+                <p>Especially useful for readers working with reference texts, legal material, technical documents, long-form scholarly works, richly structured documents, and exegesis.</p>
+            </article>
 
-<section class="section">
-    <h2>Comparison</h2>
-    <p class="comparison">Core for serious reading. Reference for deeper study, annotation, and linked reading. Professional for intensive research and large-document work.</p>
-</section>
+            <article class="plan">
+                <h3>Codex Professional</h3>
+                <p>Advanced research and professional reading workflows for large, demanding document collections.</p>
+                <ul>
+                    <li>Everything in lower tiers</li>
+                    <li>Advanced annotation system</li>
+                    <li>Notes, tags, notebooks, and research collections</li>
+                    <li>Cross-document linking</li>
+                    <li>Parallel and comparative reading</li>
+                    <li>Advanced search across the library</li>
+                    <li>Citation, excerpt, and export tools</li>
+                    <li>Structured navigation for very large works</li>
+                    <li>Richer sync for workspaces and metadata</li>
+                    <li>Professional workflows for legal, academic, technical, governmental, and institutional reading</li>
+                </ul>
+                <p>Codex Professional is in active development. Register interest to receive updates on progress, availability, and professional or institutional access.</p>
+                <a class="cta-link" href="mailto:professional@graphe.one?subject=Codex%20Professional%20Interest">Register Interest</a>
+            </article>
+        </section>
 
-<section class="section">
-    <h2>Incremental Release</h2>
-    <p class="note">Codex may be introduced incrementally. The initial release may begin with Codex Core and Codex Reference, with Codex Professional developing later as a broader research and institutional layer.</p>
-</section>
+        <section class="section">
+            <h2>Comparison</h2>
+            <p class="comparison">Core for serious reading. Reference for deeper study, annotation, and linked reading. Professional for intensive research and large-document work.</p>
+        </section>
 
-<div class="callout">
-    <h2>Approach</h2>
-    <p class="intro">Codex Core should feel complete. Codex Reference should deepen study and reference work without narrowing the app’s identity. Codex Professional should extend the same reading environment into a full research workspace for large, structured collections.</p>
-</div>
+        <section class="section">
+            <h2>Incremental Release</h2>
+            <p class="note">Codex may be introduced incrementally. The initial release may begin with Codex Core and Codex Reference, with Codex Professional developing later as a broader research and institutional layer.</p>
+        </section>
+
+        <div class="callout">
+            <h2>Approach</h2>
+            <p class="intro">Codex Core should feel complete. Codex Reference should deepen study and reference work without narrowing the app’s identity. Codex Professional should extend the same reading environment into a full research workspace for large, structured collections.</p>
+        </div>
+    </main>
+
+    <footer>
+        <div class="wrap">
+            <div class="links">
+                <a href="./index.html">Codex Home</a>
+                <a href="./pricing.html">Pricing</a>
+                <a href="./support.html">Support</a>
+                <a href="./privacy.html">Privacy Policy</a>
+            </div>
+            <div>© 2026 Studio Graphē One</div>
+        </div>
+    </footer>
+</body>
+</html>
