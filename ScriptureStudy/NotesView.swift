@@ -4,6 +4,7 @@ struct NotesView: View {
     @EnvironmentObject var notesManager:     NotesManager
     @EnvironmentObject var myBible:          MyBibleService
     @EnvironmentObject var bookmarksManager: BookmarksManager
+    @EnvironmentObject var favourites:       FavouritesStore
 
     @AppStorage("fontSize") private var fontSize: Double = 16
     @AppStorage("fontName")      private var fontName:     String = ""
@@ -87,6 +88,53 @@ struct NotesView: View {
             .padding(.vertical, 11)
 
             Divider()
+
+            // ── Favourite books picker ───────────────────────────
+            // Always visible so you can see the feature even before
+            // starring anything. Reading `favouritePaths` (rather than the
+            // computed `favouriteURLs`) ensures SwiftUI actually observes
+            // the @Published property and re-renders when it changes.
+            HStack(spacing: 6) {
+                Image(systemName: "star.fill")
+                    .font(.caption).foregroundStyle(filigreeAccent)
+                Text("FAVOURITES")
+                    .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                Spacer()
+                if favourites.favouritePaths.isEmpty {
+                    Text("none yet")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .italic()
+                } else {
+                    Menu {
+                        ForEach(favourites.favouritePaths, id: \.self) { path in
+                            let url = URL(fileURLWithPath: path)
+                            Button {
+                                openFavouriteBook(url)
+                            } label: {
+                                Text(favouriteDisplayName(url))
+                            }
+                        }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text("Pick a book (\(favourites.favouritePaths.count))")
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(.primary)
+                                .lineLimit(1)
+                            Image(systemName: "chevron.up.chevron.down")
+                                .font(.system(size: 8, weight: .semibold))
+                                .foregroundStyle(filigreeAccent)
+                        }
+                        .padding(.horizontal, 8).padding(.vertical, 4)
+                        .background(Color.primary.opacity(0.06))
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                    }
+                    .menuStyle(.borderlessButton)
+                    .fixedSize()
+                }
+            }
+            .padding(.horizontal, 14).padding(.vertical, 6)
+            .background(filigreeAccent.opacity(0.04))
 
             // ── Bookmarks section ─────────────────────────────────
             if !bookmarksManager.bookmarks.isEmpty {
@@ -416,6 +464,35 @@ struct NotesView: View {
             .first?.windows.first?.rootViewController?
             .present(av, animated: true)
         #endif
+    }
+
+    // MARK: - Favourites helpers
+
+    /// Cleans up a book's file name into a human-readable label for the
+    /// picker menu: strips the extension, swaps underscores/hyphens for
+    /// spaces. Keeps the result short enough for a menu entry.
+    private func favouriteDisplayName(_ url: URL) -> String {
+        url.deletingPathExtension().lastPathComponent
+            .replacingOccurrences(of: "_", with: " ")
+            .replacingOccurrences(of: "-", with: " ")
+    }
+
+    /// Switches to the Books tab and asks it to open the given URL at
+    /// its saved reading position. Uses the existing tab-switch
+    /// notification plus a short delay so the Books tab's listener is
+    /// active when the open-book request arrives.
+    private func openFavouriteBook(_ url: URL) {
+        NotificationCenter.default.post(
+            name: Notification.Name("switchToLibraryTab"),
+            object: nil
+        )
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+            NotificationCenter.default.post(
+                name: Notification.Name("openBookByPath"),
+                object: nil,
+                userInfo: ["path": url.path]
+            )
+        }
     }
 }
 

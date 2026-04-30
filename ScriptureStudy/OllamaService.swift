@@ -97,11 +97,15 @@ class OllamaService: ObservableObject {
         }
         messages.append(["role": "user", "content": userMessage])
 
-        // Build request
+        // Build request. keep_alive: -1 tells Ollama to keep the model
+        // resident in memory instead of unloading it after 5 minutes of
+        // inactivity — eliminates the warm-up delay on subsequent
+        // questions within the same session.
         let body: [String: Any] = [
-            "model":    selectedModel,
-            "messages": messages,
-            "stream":   false
+            "model":      selectedModel,
+            "messages":   messages,
+            "stream":     false,
+            "keep_alive": -1
         ]
 
         guard let url = URL(string: "\(baseURL)/api/chat") else {

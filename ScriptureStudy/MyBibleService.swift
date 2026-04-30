@@ -133,6 +133,11 @@ struct MyBibleVerse: Identifiable, Equatable {
     let chapter: Int
     let verse:   Int
     let text:    String
+    /// Translator's gloss notes extracted from the verse's `<n>...</n>`
+    /// tags before the tags were stripped. Empty when the verse contains
+    /// no footnote markup. Rendered as a single tap-target superscript at
+    /// the end of the verse when `showGlossNotes` is enabled.
+    var glosses: [String] = []
 }
 
 // MARK: - Commentary Entry
@@ -406,12 +411,9 @@ class MyBibleService: ObservableObject {
 
             // Use cache if file hasn't changed
             if let entry = cache.entries[path], entry.modDate == modDate {
-                // Sidecar can be added after a module was first cached; consult it
-                // here too so English names appear without forcing a re-scan.
-                let effectiveName = sidecarDisplayName(forModuleAt: path) ?? entry.name
                 found.append(MyBibleModule(
-                    name:        effectiveName,
-                    description: effectiveName,
+                    name:        entry.name,
+                    description: entry.name,
                     language:    entry.language,
                     type:        moduleTypeFromString(entry.type),
                     filePath:    path
@@ -709,11 +711,13 @@ class MyBibleService: ObservableObject {
                 guard !raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
                 let vnum = Int(sqlite3_column_int(stmt, 2))
                 rawTexts[vnum] = raw
+                let (cleanText, notes) = stripStrongsAndTagsCapturingNotes(raw)
                 results.append(MyBibleVerse(
                     book:    Int(sqlite3_column_int(stmt, 0)),
                     chapter: Int(sqlite3_column_int(stmt, 1)),
                     verse:   vnum,
-                    text:    stripStrongsAndTags(raw)
+                    text:    cleanText,
+                    glosses: notes
                 ))
             }
             sqlite3_finalize(stmt)
@@ -1150,65 +1154,77 @@ class MyBibleService: ObservableObject {
     // MARK: - Companion panel helpers
 
     func fetchVerses(module: MyBibleModule, bookNumber: Int, chapter: Int) async -> [MyBibleVerse] {
-        var db: OpaquePointer?
-        guard sqlite3_open_v2(module.filePath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK
-        else { return [] }
-        defer { sqlite3_close(db) }
-        let sql  = "SELECT book_number, chapter, verse, text FROM verses WHERE book_number = ? AND chapter = ? ORDER BY verse"
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
-        defer { sqlite3_finalize(stmt) }
-        sqlite3_bind_int(stmt, 1, Int32(bookNumber))
-        sqlite3_bind_int(stmt, 2, Int32(chapter))
-        var results = [MyBibleVerse]()
-        while sqlite3_step(stmt) == SQLITE_ROW {
-            let raw = self.col(stmt, 3, path: module.filePath) ?? ""
-            guard !raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
-            results.append(MyBibleVerse(
-                book:    Int(sqlite3_column_int(stmt, 0)),
-                chapter: Int(sqlite3_column_int(stmt, 1)),
-                verse:   Int(sqlite3_column_int(stmt, 2)),
-                text:    stripStrongsAndTags(raw)
-            ))
-        }
-        return results
+        await fetchVersesOffActor(module: module, bookNumber: bookNumber, chapter: chapter)
+    }
+
+    nonisolated private func fetchVersesOffActor(module: MyBibleModule, bookNumber: Int, chapter: Int) async -> [MyBibleVerse] {
+        await Task.detached(priority: .userInitiated) {
+            var db: OpaquePointer?
+            guard sqlite3_open_v2(module.filePath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK
+            else { return [] }
+            defer { sqlite3_close(db) }
+            let sql  = "SELECT book_number, chapter, verse, text FROM verses WHERE book_number = ? AND chapter = ? ORDER BY verse"
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+            defer { sqlite3_finalize(stmt) }
+            sqlite3_bind_int(stmt, 1, Int32(bookNumber))
+            sqlite3_bind_int(stmt, 2, Int32(chapter))
+            var results = [MyBibleVerse]()
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                let raw = self.col(stmt, 3, path: module.filePath) ?? ""
+                guard !raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
+                let (cleanText, notes) = self.stripStrongsAndTagsCapturingNotes(raw)
+                results.append(MyBibleVerse(
+                    book:    Int(sqlite3_column_int(stmt, 0)),
+                    chapter: Int(sqlite3_column_int(stmt, 1)),
+                    verse:   Int(sqlite3_column_int(stmt, 2)),
+                    text:    cleanText,
+                    glosses: notes
+                ))
+            }
+            return results
+        }.value
     }
 
     func fetchCommentaryEntries(module: MyBibleModule, bookNumber: Int, chapter: Int) async -> [CommentaryEntry] {
-        var db: OpaquePointer?
-        guard sqlite3_open_v2(module.filePath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK
-        else { return [] }
-        defer { sqlite3_close(db) }
-        let sql = """
-            SELECT book_number, chapter_number_from, verse_number_from,
-                   chapter_number_to, verse_number_to, text
-            FROM commentaries
-            WHERE book_number = ? AND chapter_number_from = ?
-            ORDER BY verse_number_from
-            """
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
-        defer { sqlite3_finalize(stmt) }
-        sqlite3_bind_int(stmt, 1, Int32(bookNumber))
-        sqlite3_bind_int(stmt, 2, Int32(chapter))
-        var results = [CommentaryEntry]()
-        while sqlite3_step(stmt) == SQLITE_ROW {
-            let raw       = self.col(stmt, 5, path: module.filePath) ?? ""
-            let verseFrom = Int(sqlite3_column_int(stmt, 2))
-            var verseTo   = Int(sqlite3_column_int(stmt, 4))
-            // verseTo == 0 means the commentary covers through the end of the chapter,
-            // or is a chapter-level entry. Treat it as covering all verses (999 = any verse matches).
-            if verseTo == 0 { verseTo = verseFrom == 0 ? 999 : verseFrom }
-            results.append(CommentaryEntry(
-                bookNumber:  Int(sqlite3_column_int(stmt, 0)),
-                chapterFrom: Int(sqlite3_column_int(stmt, 1)),
-                verseFrom:   verseFrom,
-                chapterTo:   Int(sqlite3_column_int(stmt, 3)),
-                verseTo:     verseTo,
-                text:        StrongsParser.stripAllTags(raw)
-            ))
-        }
-        return results
+        return await fetchCommentaryEntriesOffActor(module: module, bookNumber: bookNumber, chapter: chapter)
+    }
+
+    nonisolated private func fetchCommentaryEntriesOffActor(module: MyBibleModule, bookNumber: Int, chapter: Int) async -> [CommentaryEntry] {
+        await Task.detached(priority: .userInitiated) {
+            var db: OpaquePointer?
+            guard sqlite3_open_v2(module.filePath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK
+            else { return [] }
+            defer { sqlite3_close(db) }
+            let sql = """
+                SELECT book_number, chapter_number_from, verse_number_from,
+                       chapter_number_to, verse_number_to, text
+                FROM commentaries
+                WHERE book_number = ? AND chapter_number_from = ?
+                ORDER BY verse_number_from
+                """
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+            defer { sqlite3_finalize(stmt) }
+            sqlite3_bind_int(stmt, 1, Int32(bookNumber))
+            sqlite3_bind_int(stmt, 2, Int32(chapter))
+            var results = [CommentaryEntry]()
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                let raw       = self.col(stmt, 5, path: module.filePath) ?? ""
+                let verseFrom = Int(sqlite3_column_int(stmt, 2))
+                var verseTo   = Int(sqlite3_column_int(stmt, 4))
+                if verseTo == 0 { verseTo = verseFrom == 0 ? 999 : verseFrom }
+                results.append(CommentaryEntry(
+                    bookNumber:  Int(sqlite3_column_int(stmt, 0)),
+                    chapterFrom: Int(sqlite3_column_int(stmt, 1)),
+                    verseFrom:   verseFrom,
+                    chapterTo:   Int(sqlite3_column_int(stmt, 3)),
+                    verseTo:     verseTo,
+                    text:        StrongsParser.stripAllTags(raw)
+                ))
+            }
+            return results
+        }.value
     }
 
     private func stripStrongsAndTags(_ raw: String) -> String {
@@ -1236,6 +1252,41 @@ class MyBibleService: ObservableObject {
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    /// Like `stripStrongsAndTags` but also extracts the content of each
+    /// `<n>...</n>` translator note into a list before stripping. Used when
+    /// rendering verses in the Bible view so we can show a superscript
+    /// indicator and popover. The returned text is identical to what the
+    /// plain variant returns.
+    nonisolated private func stripStrongsAndTagsCapturingNotes(_ raw: String) -> (text: String, notes: [String]) {
+        var t = raw
+        var notes: [String] = []
+        while let o = t.range(of: "<n>"),
+              let c = t.range(of: "</n>", range: o.lowerBound..<t.endIndex) {
+            // Pull out the inner text, stripping any nested tags so the
+            // popover shows clean prose rather than markup.
+            let inner = String(t[o.upperBound..<c.lowerBound])
+            let clean = StrongsParser.stripAllTags(inner)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if !clean.isEmpty { notes.append(clean) }
+            t.removeSubrange(o.lowerBound..<c.upperBound)
+        }
+        // Strong's tags and other markup — same stripping as the plain path.
+        while let o = t.range(of: "<S>"),
+              let c = t.range(of: "</S>", range: o.lowerBound..<t.endIndex) {
+            t.removeSubrange(o.lowerBound..<c.upperBound)
+        }
+        for prefix in ["<WG", "<WH"] {
+            while let r = t.range(of: prefix),
+                  let end = t.range(of: ">", range: r.upperBound..<t.endIndex) {
+                t.removeSubrange(r.lowerBound...end.lowerBound)
+            }
+        }
+        let cleaned = StrongsParser.stripAllTags(t)
+            .replacingOccurrences(of: "  ", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return (cleaned, notes)
+    }
+
 
 
 
@@ -1249,7 +1300,11 @@ class MyBibleService: ObservableObject {
         return await lookupWord(word: word, in: module, fallbackType: nil)
     }
 
-    private func lookupWord(word: String, in module: MyBibleModule?, fallbackType: ModuleType?) async -> (topic: String, definition: String)? {
+    func lookupLinkedWord(word: String, in module: MyBibleModule?) async -> (topic: String, definition: String)? {
+        return await lookupWord(word: word, in: module, fallbackType: nil, preservingMarkup: true)
+    }
+
+    private func lookupWord(word: String, in module: MyBibleModule?, fallbackType: ModuleType?, preservingMarkup: Bool = false) async -> (topic: String, definition: String)? {
         let dicts: [MyBibleModule]
         if let selected = module {
             dicts = [selected]
@@ -1277,28 +1332,32 @@ class MyBibleService: ObservableObject {
                         let raw   = self.col(stmt, 1, path: module.filePath) ?? ""
                         sqlite3_finalize(stmt)
                         let clean = raw
-                            .replacingOccurrences(of: "<p/>",  with: "\n\n")
-                            .replacingOccurrences(of: "<p />", with: "\n\n")
-                            .replacingOccurrences(of: "<br/>", with: "\n")
-                            .replacingOccurrences(of: "<br />", with: "\n")
-                            .replacingOccurrences(of: "<br>",  with: "\n")
-                        // Strip remaining HTML tags
-                        let stripped: String
-                        if let regex = try? NSRegularExpression(pattern: "<[^>]+>") {
-                            stripped = regex.stringByReplacingMatches(
-                                in: clean,
-                                range: NSRange(clean.startIndex..., in: clean),
-                                withTemplate: "")
-                        } else {
-                            stripped = clean
-                        }
-                        let result = stripped
                             .replacingOccurrences(of: "&amp;",  with: "&")
                             .replacingOccurrences(of: "&lt;",   with: "<")
                             .replacingOccurrences(of: "&gt;",   with: ">")
                             .replacingOccurrences(of: "&nbsp;", with: " ")
                             .replacingOccurrences(of: "&#160;", with: " ")
-                            .trimmingCharacters(in: .whitespacesAndNewlines)
+                        let result: String
+                        if preservingMarkup {
+                            result = clean.trimmingCharacters(in: .whitespacesAndNewlines)
+                        } else {
+                            let blockFormatted = clean
+                                .replacingOccurrences(of: "<p/>",  with: "\n\n")
+                                .replacingOccurrences(of: "<p />", with: "\n\n")
+                                .replacingOccurrences(of: "<br/>", with: "\n")
+                                .replacingOccurrences(of: "<br />", with: "\n")
+                                .replacingOccurrences(of: "<br>",  with: "\n")
+                            let stripped: String
+                            if let regex = try? NSRegularExpression(pattern: "<[^>]+>") {
+                                stripped = regex.stringByReplacingMatches(
+                                    in: blockFormatted,
+                                    range: NSRange(blockFormatted.startIndex..., in: blockFormatted),
+                                    withTemplate: "")
+                            } else {
+                                stripped = blockFormatted
+                            }
+                            result = stripped.trimmingCharacters(in: .whitespacesAndNewlines)
+                        }
                         return (topic: topic, definition: result)
                     }
                     sqlite3_finalize(stmt)
@@ -1517,5 +1576,56 @@ class MyBibleService: ObservableObject {
         }.value
     }
 
+    // MARK: - Reading plan
+    //
+    // Used by both OrganizerView and DevotionalView. `PlanEntry` is the
+    // resolved daily entry from a reading-plan module's `reading_plan`
+    // table: which book and chapter/verse range to read on day N of the plan.
 
+    struct PlanEntry {
+        let bookNumber:    Int
+        let startChapter:  Int
+        let startVerse:    Int?
+        let endChapter:    Int?
+        let endVerse:      Int?
+        let displayText:   String
+    }
+
+    /// Loads the reading plan entry for a given day (1–365ish) from a
+    /// reading-plan module. Returns nil if the module has no entry for that
+    /// day or the file can't be opened.
+    func loadPlanEntry(day: Int, from module: MyBibleModule) async -> PlanEntry? {
+        return await Task.detached(priority: .userInitiated) {
+            var db: OpaquePointer?
+            guard sqlite3_open_v2(module.filePath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK
+            else { return nil }
+            defer { sqlite3_close(db) }
+
+            var stmt: OpaquePointer?
+            let sql = "SELECT book_number, start_chapter, start_verse, end_chapter, end_verse FROM reading_plan WHERE day=? AND book_number != 'day' LIMIT 1"
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
+            sqlite3_bind_int(stmt, 1, Int32(day))
+            guard sqlite3_step(stmt) == SQLITE_ROW else { sqlite3_finalize(stmt); return nil }
+
+            let bookNum = Int(sqlite3_column_int(stmt, 0))
+            let startCh = Int(sqlite3_column_int(stmt, 1))
+            let startVs = sqlite3_column_type(stmt, 2) != SQLITE_NULL ? Int(sqlite3_column_int(stmt, 2)) : nil
+            let endCh   = sqlite3_column_type(stmt, 3) != SQLITE_NULL ? Int(sqlite3_column_int(stmt, 3)) : nil
+            let endVs   = sqlite3_column_type(stmt, 4) != SQLITE_NULL ? Int(sqlite3_column_int(stmt, 4)) : nil
+            sqlite3_finalize(stmt)
+
+            let bookName = myBibleBookNumbers[bookNum] ?? "\(bookNum)"
+            var display  = "\(bookName) \(startCh)"
+            if let sv = startVs { display += ":\(sv)" }
+            if let ec = endCh, let ev = endVs { display += " – \(bookName) \(ec):\(ev)" }
+
+            return PlanEntry(
+                bookNumber:   bookNum,
+                startChapter: startCh,
+                startVerse:   startVs,
+                endChapter:   endCh,
+                endVerse:     endVs,
+                displayText:  display)
+        }.value
+    }
 }

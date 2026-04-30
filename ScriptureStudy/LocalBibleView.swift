@@ -9,6 +9,7 @@ struct LocalBibleView: View {
     @AppStorage("strongsFlashEnabled")   private var strongsFlashEnabled: Bool = true
     @AppStorage("strongsOnlyFilter")      private var strongsOnly:          Bool = false
     @AppStorage("showStatusHints")        private var showStatusHints:    Bool = true
+    @AppStorage("showGlossNotes")         private var showGlossNotes:     Bool = true
     @EnvironmentObject var ollama:            OllamaService
 
     @AppStorage("fontSize") private var fontSize: Double = 16
@@ -56,19 +57,34 @@ struct LocalBibleView: View {
         myBible.modules.filter { $0.type == .strongs }
     }
 
-    // Verse numbers that have notes in this chapter
+    // Verse numbers that have ACTIVE notes in this chapter. Archived
+    // and trashed notes are excluded so the inline blue note icon in
+    // the gutter correctly disappears when its last active note is
+    // moved to Trash.
     var annotatedVerses: Set<Int> {
         Set(notesManager.notes.filter {
+            !$0.isArchived &&
+            $0.deletedAt == nil &&
             $0.bookNumber == selectedBookNumber &&
             $0.chapterNumber == selectedChapter &&
             !$0.verseNumbers.isEmpty
         }.flatMap { $0.verseNumbers })
     }
 
+    // Verse numbers that have bookmarks in this chapter
+    var bookmarkedVerseNumbers: Set<Int> {
+        bookmarksManager.bookmarkedVerses(
+            book: selectedBookNumber,
+            chapter: selectedChapter)
+    }
+
     // Pre-computed once per chapter — avoids calling notes(forBook:chapter:verse:)
-    // inside the ForEach on every scroll frame
+    // inside the ForEach on every scroll frame. Excludes archived and
+    // trashed notes.
     var linkedNotesMap: [Int: [Note]] {
         let chapterNotes = notesManager.notes.filter {
+            !$0.isArchived &&
+            $0.deletedAt == nil &&
             $0.bookNumber == selectedBookNumber &&
             $0.chapterNumber == selectedChapter
         }
@@ -83,7 +99,26 @@ struct LocalBibleView: View {
 
     var body: some View {
         readingColumn
-        .onAppear { loadAvailableBooks(); Task { await loadChapter() } }
+        .onAppear {
+            print("[STARTUP] LocalBibleView.onAppear")
+            // Beachball fix 2026-04-21: the Bible tab reconstructs on
+            // every tab switch back. Skip the expensive chapter/book
+            // reload when the current state already matches what the
+            // user was viewing. Without this guard, returning from any
+            // other tab re-runs loadAvailableBooks + loadChapter (SQL
+            // queries + potential AI summary regeneration), producing
+            // a 1-3 second beachball for a no-op state.
+            let needsBooks = availableBooks.isEmpty
+            let needsChapter = myBible.verses.isEmpty
+                || myBible.currentBookNumber != selectedBookNumber
+                || myBible.currentChapter   != selectedChapter
+            if needsBooks {
+                loadAvailableBooks()
+            }
+            if needsChapter {
+                Task { await loadChapter() }
+            }
+        }
         .onChange(of: myBible.selectedBible) { loadAvailableBooks()
             Task { await loadChapter() }
         }
@@ -95,14 +130,12 @@ struct LocalBibleView: View {
         }
 
 
-        .onReceive(NotificationCenter.default.publisher(
-                for: Notification.Name("createNoteForVerse"))) { note in
-            guard let bn = note.userInfo?["bookNumber"] as? Int,
-                  let ch = note.userInfo?["chapter"]    as? Int,
-                  let vs = note.userInfo?["verse"]       as? Int,
-                  bn == selectedBookNumber, ch == selectedChapter else { return }
-            createNoteForVerse(vs)
-        }
+        // Removed: .onReceive(createNoteForVerse). Previously the
+        // VerseWithStrongsView popover posted a notification here that
+        // this view listened for; SwiftUI's .onReceive accumulated
+        // duplicate subscriptions over re-renders, causing one tap to
+        // fire N times. Replaced with a direct onAddNote callback.
+
         .onReceive(NotificationCenter.default.publisher(
                 for: Notification.Name("dictionaryWordTapped"))) { note in
             guard let word = note.userInfo?["word"] as? String else { return }
@@ -395,34 +428,55 @@ struct LocalBibleView: View {
 
                     ForEach(myBible.verses) { verse in
                         let _ = annotatedVerses // observe changes
+                        let _ = bookmarkedVerseNumbers  // observe changes
                         let isSelected  = selectedVerse == verse.verse
                         let hasNote     = annotatedVerses.contains(verse.verse)
+                        let isVerseBookmarked = bookmarkedVerseNumbers.contains(verse.verse)
                         let linkedNotes = linkedNotesMap[verse.verse] ?? []
-                        VerseWithStrongsView(
-                            verse:         verse,
-                            rawText:       myBible.rawVerseTexts[verse.verse] ?? verse.text,
-                            strongsModule: myBible.selectedStrongs,
-                            isSelected:    isSelected,
-                            hasNote:       hasNote,
-                            linkedNotes:   linkedNotes,
-                            onTapVerseNum: {
-                                selectedVerse = (selectedVerse == verse.verse) ? 0 : verse.verse
-                                let bn = selectedBookNumber
-                                let ch = selectedChapter
-                                let sv = selectedVerse
-                                NotificationCenter.default.post(
-                                    name: Notification.Name("verseSelected"),
-                                    object: nil,
-                                    userInfo: ["bookNumber": bn, "chapter": ch, "verse": sv]
-                                )
-                            },
-                            onLongPressVerseNum: {
-                                createNoteForVerse(verse.verse)
+                        HStack(alignment: .firstTextBaseline, spacing: 0) {
+                            VerseWithStrongsView(
+                                verse:         verse,
+                                rawText:       myBible.rawVerseTexts[verse.verse] ?? verse.text,
+                                strongsModule: myBible.selectedStrongs,
+                                isSelected:    isSelected,
+                                hasNote:       hasNote,
+                                isBookmarked:  isVerseBookmarked,
+                                linkedNotes:   linkedNotes,
+                                onTapVerseNum: {
+                                    selectedVerse = (selectedVerse == verse.verse) ? 0 : verse.verse
+                                    let bn = selectedBookNumber
+                                    let ch = selectedChapter
+                                    let sv = selectedVerse
+                                    NotificationCenter.default.post(
+                                        name: Notification.Name("verseSelected"),
+                                        object: nil,
+                                        userInfo: ["bookNumber": bn, "chapter": ch, "verse": sv]
+                                    )
+                                },
+                                onLongPressVerseNum: {
+                                    createNoteForVerse(verse.verse)
+                                },
+                                onToggleBookmark: {
+                                    bookmarksManager.toggle(
+                                        book:    selectedBookNumber,
+                                        chapter: selectedChapter,
+                                        verse:   verse.verse)
+                                },
+                                onAddNote: {
+                                    createNoteForVerse(verse.verse)
+                                }
+                            )
+                            .environmentObject(myBible)
+                            .environmentObject(notesManager)
+                            .environmentObject(bmapsService)
+
+                            // Translator's gloss-note indicator — one per verse.
+                            // Tapping shows a popover listing every <n>...</n>
+                            // note the translator included for that verse.
+                            if showGlossNotes && !verse.glosses.isEmpty {
+                                GlossNoteMarker(notes: verse.glosses)
                             }
-                        )
-                        .environmentObject(myBible)
-                        .environmentObject(notesManager)
-                        .environmentObject(bmapsService)
+                        }
                         .padding(.bottom, 14)
                         .verseAnchor(verse.verse)
                         .id(verse.verse)
@@ -453,32 +507,11 @@ struct LocalBibleView: View {
             }
             } // end ScrollViewReader
 
-            // ── Bookmark ribbon — thin, Kindle-style ──
-            let isBookmarked = bookmarksManager.isBookmarked(
-                book: selectedBookNumber, chapter: selectedChapter)
-
-            Button {
-                bookmarksManager.toggle(book: selectedBookNumber, chapter: selectedChapter)
-            } label: {
-                BookmarkRibbon()
-                    .fill(isBookmarked
-                          ? Color.red
-                          : Color.gray.opacity(0.12))
-                    .overlay(
-                        BookmarkRibbon()
-                            .stroke(isBookmarked
-                                    ? Color.red.opacity(0.7)
-                                    : Color.gray.opacity(0.25),
-                                    lineWidth: 0.75)
-                    )
-                    .contentShape(BookmarkRibbon())
-                    .frame(width: 16, height: 34)
-                    .animation(.easeInOut(duration: 0.15), value: isBookmarked)
-            }
-            .buttonStyle(.plain)
-            .padding(.top, 2)
-            .padding(.trailing, 22)
-            .help(isBookmarked ? "Remove bookmark" : "Bookmark this chapter")
+            // Kindle-style chapter ribbon removed — verse-level
+            // bookmarks with inline ox-blood icons are now the sole
+            // bookmark surface in the Bible reader. See the popover
+            // "Bookmark Verse" action in VerseWithStrongsView, and
+            // the inline icons rendered next to each verse number.
         }
     }
 
@@ -561,14 +594,17 @@ struct LocalBibleView: View {
     // MARK: - Actions
 
     private func createNoteForVerse(_ verseNum: Int) {
+        print("[NOTE DEBUG] createNoteForVerse called: book=\(selectedBookNumber) ch=\(selectedChapter) v=\(verseNum)")
         let note = notesManager.createNote(
             bookNumber: selectedBookNumber,
             chapter:    selectedChapter,
             verses:     [verseNum]
         )
-        // Open in Organizer editor via notification — stay on Bible tab
+        print("[NOTE DEBUG] createNote returned note id=\(note.id) verseRef=\(note.verseReference)")
+        print("[NOTE DEBUG] notesManager.notes.count after create = \(notesManager.notes.count)")
+        print("[NOTE DEBUG] posting openNoteInCompanion for note \(note.id)")
         NotificationCenter.default.post(
-            name: Notification.Name("noteCreatedFromVerse"),
+            name: Notification.Name("openNoteInCompanion"),
             object: nil,
             userInfo: ["note": note]
         )
@@ -739,5 +775,76 @@ struct LocalBibleView: View {
 private extension Array {
     subscript(safe index: Int) -> Element? {
         indices.contains(index) ? self[index] : nil
+    }
+}
+
+// MARK: - Gloss note marker
+//
+// Small superscript indicator shown at the end of verses that contain one
+// or more translator's notes (extracted from `<n>...</n>` tags). Tapping
+// opens a popover listing every note for that verse. Deliberately
+// unobtrusive — a single lowercase "n" styled as a superscript in the
+// theme's accent colour.
+
+struct GlossNoteMarker: View {
+    let notes: [String]
+
+    @AppStorage("themeID")       private var themeID:       String = "light"
+    @AppStorage("filigreeColor") private var filigreeColor: Int    = 0
+    @AppStorage("fontSize")      private var fontSize:      Double = 16
+
+    private var accent: Color {
+        resolvedFiligreeAccent(colorIndex: filigreeColor, themeID: themeID)
+    }
+
+    @State private var showingPopover = false
+
+    var body: some View {
+        Button {
+            showingPopover.toggle()
+        } label: {
+            Text("ⁿ")
+                .font(.system(size: fontSize, weight: .semibold))
+                .foregroundStyle(accent)
+                .padding(.leading, 3)
+                .padding(.trailing, 2)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(notes.count == 1 ? "Translator's note" : "\(notes.count) translator's notes")
+        .popover(isPresented: $showingPopover, arrowEdge: .top) {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 6) {
+                    Image(systemName: "quote.opening")
+                        .font(.system(size: 10))
+                        .foregroundStyle(accent)
+                    Text("TRANSLATOR'S NOTE\(notes.count == 1 ? "" : "S")")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(accent)
+                        .tracking(1.2)
+                }
+                Divider()
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(Array(notes.enumerated()), id: \.offset) { idx, note in
+                        if notes.count > 1 {
+                            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                                Text("\(idx + 1).")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.tertiary)
+                                Text(note)
+                                    .font(.system(size: 13))
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        } else {
+                            Text(note)
+                                .font(.system(size: 13))
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                }
+            }
+            .padding(16)
+            .frame(minWidth: 240, maxWidth: 360)
+        }
     }
 }

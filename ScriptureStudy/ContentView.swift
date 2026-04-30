@@ -38,7 +38,7 @@ struct ContentView: View {
                     ZStack { ChatView() }
                         .tabItem { Label("Chat",        systemImage: "bubble.left.and.bubble.right.fill") }.tag(10)
                     ZStack { Color.white; DevotionalView() }
-                        .tabItem { Label("Devotional",  systemImage: "book.closed.fill") }.tag(8)
+                        .tabItem { Label("Time Alone",  systemImage: "book.closed.fill") }.tag(8)
                     ZStack { OrganizerView() }
                         .tabItem { Label("Organizer",   systemImage: "calendar") }.tag(4)
                     ZStack { Color.white; SearchView() }
@@ -50,7 +50,25 @@ struct ContentView: View {
                     ZStack { SettingsView() }
                         .tabItem { Label("Settings",    systemImage: "gearshape.fill") }.tag(7)
                 }
-                .onReceive(NotificationCenter.default.publisher(for: .navigateToPassage)) { _ in selectedTab = 0
+                .onReceive(NotificationCenter.default.publisher(for: .navigateToPassage)) { note in
+                    // Switch to the Bible tab first. Capture the userInfo and
+                    // re-post on the next run loop tick so LocalBibleView's
+                    // listener fires *after* it has become the active tab.
+                    // Without the delayed re-post, navigation from a hidden
+                    // tab (e.g. Devotional) switches tabs but doesn't jump to
+                    // the target passage.
+                    let info = note.userInfo
+                    if selectedTab != 0 {
+                        selectedTab = 0
+                        if info != nil {
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                                NotificationCenter.default.post(
+                                    name: .navigateToPassage,
+                                    object: nil,
+                                    userInfo: info)
+                            }
+                        }
+                    }
                 }
                 .onReceive(NotificationCenter.default.publisher(for: .navigateToCommentary)) { _ in selectedTab = 1
                 }
@@ -83,10 +101,6 @@ struct ContentView: View {
             }
         }
         .tint(filigreeAccent)
-        .onAppear {
-            bmapsService.loadIfNeeded()
-            interlinearService.loadIfNeeded()
-        }
         .environmentObject(bmapsService)
         .environmentObject(interlinearService)
         .background(theme.background.ignoresSafeArea())

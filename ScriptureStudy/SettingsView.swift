@@ -237,8 +237,16 @@ struct SettingsView: View {
         filigreeIntensity   = 0.25
         autoSummaryEnabled  = true
         showLaunchAnimation = true
+        // Advanced toggles reset to architecture-appropriate defaults:
+        // on for Apple Silicon, off for Intel. Keeps behaviour consistent
+        // with the one-time bootstrap that runs on first launch.
+        #if arch(arm64)
+        detectScriptureRefs = true
+        preCacheEpubPages   = true
+        #else
         detectScriptureRefs = false
         preCacheEpubPages   = false
+        #endif
         customFont          = ""
     }
 
@@ -625,31 +633,34 @@ struct SettingsView: View {
 
             // MARK: Advanced — Book Reader
             Section {
+                // Warning shown only on Intel Macs — Apple Silicon users
+                // don't see it because the features are effectively free
+                // on their machines.
+                #if !arch(arm64)
                 HStack(alignment: .top, spacing: 10) {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .foregroundStyle(.orange).font(.system(size: 14))
-                    Text("These options add extra processing when opening books. They can make pages take noticeably longer to load, especially on large books.")
+                    Text("Turning these on may make book pages load more slowly on Intel Macs.")
                         .font(.caption).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }.padding(.vertical, 4)
+                #endif
 
-                Toggle(isOn: .constant(false)) {
+                Toggle(isOn: $detectScriptureRefs) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Enrich book text with interactive links").font(.body)
-                        Text("Coming in a future update — will detect Bible references in your books and make them tappable.")
+                        Text("Detects Bible references like \"Rom. 8:28\" or \"John 3:16\" inside your books and turns them into tappable links that open the Bible tab.")
                             .font(.caption).foregroundStyle(.secondary)
                     }
                 }
-                .disabled(true)
 
-                Toggle(isOn: .constant(false)) {
+                Toggle(isOn: $preCacheEpubPages) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Pre-process books for faster re-reading").font(.body)
-                        Text("Coming in a future update — will process each page on first open and cache the result.")
+                        Text("Processes each page on first open and keeps the result in memory. Later visits to the same chapter load instantly.")
                             .font(.caption).foregroundStyle(.secondary)
                     }
                 }
-                .disabled(true)
             } header: {
                 Text("Advanced — Book Reader")
             }

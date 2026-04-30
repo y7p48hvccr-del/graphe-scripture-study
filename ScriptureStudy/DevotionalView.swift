@@ -11,9 +11,9 @@ struct DevotionalView: View {
     @AppStorage("fontName")      private var fontName:     String = ""
     @AppStorage("devotionalStartDay") private var storedStartDay: Int = 1
 
-    var theme:          AppTheme { AppTheme.find(themeID) }
-    var filigreeAccent:     Color { resolvedFiligreeAccent(colorIndex: filigreeColor, themeID: themeID) }
-    var filigreeAccentFill: Color { resolvedFiligreeAccentFill(colorIndex: filigreeColor, themeID: themeID) }
+    var theme:              AppTheme { AppTheme.find(themeID) }
+    var filigreeAccent:     Color    { resolvedFiligreeAccent(colorIndex: filigreeColor, themeID: themeID) }
+    var filigreeAccentFill: Color    { resolvedFiligreeAccentFill(colorIndex: filigreeColor, themeID: themeID) }
 
     @State private var entry:        MyBibleService.DevotionalEntry? = nil
     @State private var isLoading:    Bool = true
@@ -21,15 +21,48 @@ struct DevotionalView: View {
     @State private var totalDays:    Int  = 365
 
     var today: Int {
-        // Day of year (1-365)
         Calendar.current.ordinality(of: .day, in: .year, for: Date()) ?? 1
     }
 
     var body: some View {
+        #if os(macOS)
+        HSplitView {
+            devotionalSide
+                .frame(minWidth: 380)
+            ReadingPlanPanel()
+                .frame(minWidth: 380)
+        }
+        #else
         VStack(spacing: 0) {
+            devotionalSide
+            Divider()
+            ReadingPlanPanel()
+        }
+        #endif
+    }
+
+    // MARK: - Left half — the devotional page (single panel, no sub-split)
+
+    private var devotionalSide: some View {
+        VStack(spacing: 0) {
+            // ── Title strip ─────────────────────────────────────────
+            HStack {
+                Image(systemName: "book.closed.fill")
+                    .font(.system(size: 11))
+                    .foregroundStyle(filigreeAccent)
+                Text("TIME ALONE")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(filigreeAccent)
+                    .tracking(1.2)
+                Spacer()
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 10)
+            .padding(.bottom, 4)
+            .background(theme.background)
+
             // ── Header bar ──────────────────────────────────────────
             HStack(spacing: 12) {
-                // Module picker
                 devotionalPicker
                 #if os(macOS)
                 HelpButton(page: "devotional")
@@ -64,7 +97,7 @@ struct DevotionalView: View {
                 .foregroundStyle(.primary)
             }
             .padding(.horizontal, 16)
-            .padding(.vertical, 10)
+            .padding(.bottom, 10)
             .background(theme.background)
 
             Divider()
@@ -74,6 +107,7 @@ struct DevotionalView: View {
                 emptyState
             } else if isLoading {
                 VStack { Spacer(); ProgressView("Loading…"); Spacer() }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(theme.background)
             } else if let entry = entry {
                 DevotionalContentView(
@@ -90,6 +124,7 @@ struct DevotionalView: View {
                     Text("No entry for Day \(currentDay)").foregroundStyle(.secondary)
                     Spacer()
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(theme.background)
             }
         }
@@ -111,9 +146,6 @@ struct DevotionalView: View {
             }
         } label: {
             HStack(spacing: 4) {
-                Image(systemName: "book.closed.fill")
-                    .font(.system(size: 11))
-                    .foregroundStyle(filigreeAccent)
                 Text(label)
                     .font(.caption.weight(.medium))
                     .foregroundStyle(.primary)
@@ -128,8 +160,6 @@ struct DevotionalView: View {
         }
         .menuStyle(.borderlessButton)
     }
-
-    // MARK: - Empty state
 
     private var emptyState: some View {
         VStack(spacing: 16) {
@@ -188,7 +218,6 @@ struct DevotionalContentView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
 
-                // Title / verse heading
                 Text(entry.title)
                     .font(titleFont)
                     .foregroundStyle(filigreeAccent)
@@ -196,15 +225,14 @@ struct DevotionalContentView: View {
 
                 Divider()
 
-                // Body — rendered via WebView for HTML fidelity
                 DevotionalWebView(
-                    html:          entry.html,
-                    theme:         theme,
-                    fontSize:      fontSize,
-                    fontName:      fontName,
-                    accentHex:     filigreeAccent.toHex()
+                    html:       entry.html,
+                    theme:      theme,
+                    fontSize:   fontSize,
+                    fontName:   fontName,
+                    accentHex:  filigreeAccent.toHex()
                 )
-                .frame(minHeight: 400)
+                .frame(minHeight: 2000)
             }
             .padding(24)
         }
@@ -218,6 +246,10 @@ struct DevotionalContentView: View {
 }
 
 // MARK: - WebView for devotion body
+//
+// Tapping a Bible reference inside the HTML posts .navigateToPassage with
+// book/chapter/verse — the main tab router switches to the Bible tab and
+// LocalBibleView jumps to the passage. Same wiring the reading plan uses.
 
 struct DevotionalWebView: WKViewRepresentable {
     let html:       String
@@ -228,11 +260,22 @@ struct DevotionalWebView: WKViewRepresentable {
 
     #if os(macOS)
     func makeNSView(context: Context) -> WKWebView { makeWebView(context: context) }
-    func updateNSView(_ webView: WKWebView, context: Context) { if context.coordinator.lastHTML != html { context.coordinator.lastHTML = html; load(in: webView) } }
+    func updateNSView(_ webView: WKWebView, context: Context) {
+        if context.coordinator.lastHTML != html {
+            context.coordinator.lastHTML = html
+            load(in: webView)
+        }
+    }
     #else
     func makeUIView(context: Context) -> WKWebView { makeWebView(context: context) }
-    func updateUIView(_ webView: WKWebView, context: Context) { if context.coordinator.lastHTML != html { context.coordinator.lastHTML = html; load(in: webView) } }
+    func updateUIView(_ webView: WKWebView, context: Context) {
+        if context.coordinator.lastHTML != html {
+            context.coordinator.lastHTML = html
+            load(in: webView)
+        }
+    }
     #endif
+
     private func makeWebView(context: Context) -> WKWebView {
         let config  = WKWebViewConfiguration()
         let webView = WKWebView(frame: .zero, configuration: config)
@@ -242,16 +285,11 @@ struct DevotionalWebView: WKViewRepresentable {
         return webView
     }
 
-
-
     private func load(in webView: WKWebView) {
         let textHex = theme.text.toHex()
         let font    = fontName.isEmpty ? "-apple-system" : fontName
 
-        // Convert B: links to custom scheme for navigation
         var body = html
-        // Replace <p/> with proper paragraph breaks
-        body = body.replacingOccurrences(of: "<p/>", with: "</p><p>")
         body = body.replacingOccurrences(of: "<p/>", with: "</p><p>")
 
         let page = """
@@ -259,8 +297,9 @@ struct DevotionalWebView: WKViewRepresentable {
         <html>
         <head>
         <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width,initial-scale=1.0">
         <style>
-          body {
+          html, body {
             font-family: '\(font)', -apple-system, serif;
             font-size: \(fontSize)px;
             line-height: 1.8;
@@ -270,7 +309,7 @@ struct DevotionalWebView: WKViewRepresentable {
             -webkit-font-smoothing: antialiased;
           }
           p { margin: 0 0 1em 0; }
-          a { color: \(accentHex); text-decoration: none; }
+          a { color: \(accentHex); text-decoration: none; cursor: pointer; }
           a:hover { text-decoration: underline; }
           i, em { font-style: italic; }
           b, strong { font-weight: 600; }
@@ -289,36 +328,48 @@ struct DevotionalWebView: WKViewRepresentable {
 
         func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction,
                      decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
-            guard let url = action.request.url, url.scheme == "about" || action.navigationType == .linkActivated
-            else { decisionHandler(.allow); return }
-
-            if let urlStr = action.request.url?.absoluteString,
-               urlStr.contains("B:") {
-                // Post Bible reference navigation
-                if let href = action.request.url?.absoluteString {
-                    parseBibleLink(href)
-                }
-                decisionHandler(.cancel)
-            } else {
-                decisionHandler(.allow)
+            let href = action.request.url?.absoluteString ?? ""
+            // Allow the initial blank/data load so the HTML can render.
+            if href.hasPrefix("about:") || href.isEmpty {
+                decisionHandler(.allow); return
             }
+            parseBibleLink(href)
+            decisionHandler(.cancel)
         }
 
+        /// Hrefs in the devotional HTML use a URL-encoded MyBible "B:" format,
+        /// e.g. `b:540%208:1-24`. We lowercase-tolerate, decode the %20 space,
+        /// and accept an optional verse with an optional range suffix.
+        /// The Bible tab opens at the start verse of the reference.
         private func parseBibleLink(_ href: String) {
-            // Format: href contains B:BOOK CHAPTER:VERSE
-            let pattern = try? NSRegularExpression(pattern: #"B:(\d+) (\d+):(\d+)"#)
-            let ns = href as NSString
-            if let m = pattern?.firstMatch(in: href, range: NSRange(location: 0, length: ns.length)) {
-                let book = Int(ns.substring(with: m.range(at: 1))) ?? 0
-                let ch   = Int(ns.substring(with: m.range(at: 2))) ?? 1
-                let vs   = Int(ns.substring(with: m.range(at: 3))) ?? 1
-                DispatchQueue.main.async {
-                    NotificationCenter.default.post(
-                        name: .navigateToPassage,
-                        object: nil,
-                        userInfo: ["bookNumber": book, "chapter": ch, "verse": vs]
-                    )
-                }
+            let normalised = href
+                .replacingOccurrences(of: "%20", with: " ")
+                .replacingOccurrences(of: "%3A", with: ":")
+            let pattern = try? NSRegularExpression(
+                pattern: #"[bB]:\s*(\d+)\s+(\d+)(?::(\d+))?"#
+            )
+            let ns = normalised as NSString
+            guard let m = pattern?.firstMatch(in: normalised,
+                                              range: NSRange(location: 0, length: ns.length))
+            else { return }
+            let book = Int(ns.substring(with: m.range(at: 1))) ?? 0
+            let ch   = Int(ns.substring(with: m.range(at: 2))) ?? 1
+            let vs: Int
+            if m.range(at: 3).location != NSNotFound {
+                vs = Int(ns.substring(with: m.range(at: 3))) ?? 1
+            } else {
+                vs = 1
+            }
+            DispatchQueue.main.async {
+                NotificationCenter.default.post(
+                    name: .navigateToPassage,
+                    object: nil,
+                    userInfo: [
+                        "bookNumber": book,
+                        "chapter":    ch,
+                        "verse":      vs
+                    ]
+                )
             }
         }
     }

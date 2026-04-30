@@ -12,6 +12,11 @@ import Combine
 @MainActor
 class BMapsService: ObservableObject {
 
+    // STARTUP DIAGNOSTIC — 2026-04-21
+    init() {
+        print("[STARTUP] BMapsService.init()")
+    }
+
     @Published var maps:   [BibleMap]        = []
     @Published var places: [BiblePlaceEntry] = []
     @Published var isLoaded: Bool            = false
@@ -22,6 +27,7 @@ class BMapsService: ObservableObject {
     // MARK: - Load
 
     func loadIfNeeded() {
+        print("[STARTUP] BMapsService.loadIfNeeded() isLoaded=\(isLoaded)")
         guard !isLoaded else { return }
 
         // Use the same folder the user picked in Settings → Library

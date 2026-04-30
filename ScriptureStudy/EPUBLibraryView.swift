@@ -53,6 +53,7 @@ struct EPUBLibraryView: View {
     @AppStorage("filigreeColor")        private var filigreeColor:    Int    = 0
     @AppStorage("themeID")              private var themeID:          String = "light"
     @StateObject private var coverStore = CoverStore()
+    @EnvironmentObject var favourites: FavouritesStore
     // Retained security-scoped URL so the scope stays open while the view is alive
     @State private var securedFolderURL: URL? = nil
     var theme:          AppTheme { AppTheme.find(themeID) }
@@ -134,6 +135,20 @@ struct EPUBLibraryView: View {
         url.deletingPathExtension().lastPathComponent
             .replacingOccurrences(of: "_", with: " ")
             .replacingOccurrences(of: "-", with: " ")
+    }
+
+    /// Shortens a book title so the favourites menu doesn't grow wider
+    /// than the window. macOS positions menus based on the width of the
+    /// longest item, so without truncation a single long filename spills
+    /// the menu off-screen. Full name is exposed via `.help()` tooltip
+    /// on each menu button.
+    func truncateForMenu(_ s: String, limit: Int = 36) -> String {
+        guard s.count > limit else { return s }
+        let cut = s.prefix(limit)
+        if let lastSpace = cut.lastIndex(of: " ") {
+            return String(cut[..<lastSpace]) + "…"
+        }
+        return String(cut) + "…"
     }
 
     func authorName(_ url: URL) -> String {
@@ -244,6 +259,15 @@ struct EPUBLibraryView: View {
             .onAppear {
                 resolveSecuredFolder()
                 if !epubFolder.isEmpty && epubURLs.isEmpty { scan() }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: Notification.Name("openBookByPath"))) { note in
+                // Fired by the Bible tab's favourites list when the user
+                // taps a favourited book. Find the matching BookFile in
+                // our library and open it at the saved reading position.
+                guard let path = note.userInfo?["path"] as? String,
+                      let book = bookFiles.first(where: { $0.url.path == path })
+                else { return }
+                openBook(book)
             }
             .onDisappear {
                 // Do NOT stop the security scope here — EPUBReaderView is presented
@@ -396,6 +420,18 @@ struct EPUBLibraryView: View {
         } else if viewMode == "list" {
             ScrollView {
                 LazyVStack(spacing: 0) {
+                    // Continue reading strip — same prominent tile used at
+                    // the top of the grid views, pinned above the list.
+                    // Gated on searchText so a user filtering the list
+                    // doesn't see an off-topic recent book.
+                    if let lastBook = lastReadBook(),
+                       searchText.isEmpty {
+                        continueReadingSection(lastBook)
+                        Divider()
+                            .padding(.horizontal, 20)
+                            .padding(.vertical, 4)
+                    }
+
                     ForEach(filteredBooks) { book in
                         HStack(spacing: 0) {
                             BookListRow(url: book.url, format: book.format, accent: filigreeAccent,
@@ -403,6 +439,8 @@ struct EPUBLibraryView: View {
                                         isNew: newBookNames.contains(book.url.lastPathComponent))
                                 .onTapGesture { openBook(book) }
                                 .onAppear { coverStore.loadCover(for: book.url) }
+                            favouriteStarButton(for: book.url, compact: false)
+                                .padding(.horizontal, 8)
                             Button { bookToDelete = book } label: {
                                 Image(systemName: "trash")
                                     .font(.system(size: 12))
@@ -421,6 +459,19 @@ struct EPUBLibraryView: View {
                 ScrollViewReader { proxy in
                     ScrollView {
                         VStack(alignment: .leading, spacing: 0) {
+                            // Continue reading strip — prominent tile for the
+                            // single most recently-opened book. Subtly
+                            // separated from the alphabetical grid below.
+                            // Only shown when we have a recent book that
+                            // still exists in the library.
+                            if let lastBook = lastReadBook(),
+                               searchText.isEmpty {
+                                continueReadingSection(lastBook)
+                                Divider()
+                                    .padding(.horizontal, 20)
+                                    .padding(.vertical, 4)
+                            }
+
                             ForEach(booksByLetter, id: \.letter) { group in
                                 Text(group.letter)
                                     .font(.system(size: 10, weight: .semibold))
@@ -658,6 +709,79 @@ struct EPUBLibraryView: View {
                 Divider()
             }
 
+            // Favourites picker — a single integrated pill. Star icon
+            // and "FAVOURITES" label live inside the picker itself, so
+            // there's no duplicate heading above it. Picker spans full
+            // panel width so macOS anchors the menu under it rather than
+            // off-screen to the right.
+            VStack(spacing: 0) {
+                if favourites.favouritePaths.isEmpty {
+                    // Empty state — same look as the active picker but
+                    // non-interactive; explains how to populate it.
+                    HStack(spacing: 6) {
+                        Image(systemName: "star.fill")
+                            .font(.system(size: 10))
+                            .foregroundStyle(filigreeAccent.opacity(0.5))
+                        Text("FAVOURITES")
+                            .font(.system(size: 9, weight: .semibold))
+                            .kerning(1.0)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Text("star books to add")
+                            .font(.system(size: 9))
+                            .foregroundStyle(.tertiary)
+                            .italic()
+                    }
+                    .padding(.horizontal, 8).padding(.vertical, 5)
+                    .background(Color.primary.opacity(0.04))
+                    .clipShape(RoundedRectangle(cornerRadius: 5))
+                } else {
+                    Menu {
+                        ForEach(favourites.favouritePaths, id: \.self) { path in
+                            let url = URL(fileURLWithPath: path)
+                            let fullName = url.deletingPathExtension().lastPathComponent
+                                .replacingOccurrences(of: "_", with: " ")
+                                .replacingOccurrences(of: "-", with: " ")
+                            Button {
+                                if let book = bookFiles.first(where: { $0.url.path == path }) {
+                                    openBook(book)
+                                }
+                            } label: {
+                                Text(truncateForMenu(fullName))
+                            }
+                            .help(fullName)
+                        }
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "star.fill")
+                                .font(.system(size: 10))
+                                .foregroundStyle(filigreeAccent)
+                            Text("FAVOURITES")
+                                .font(.system(size: 9, weight: .semibold))
+                                .kerning(1.0)
+                                .foregroundStyle(.secondary)
+                            Text("(\(favourites.favouritePaths.count))")
+                                .font(.system(size: 9, weight: .semibold))
+                                .foregroundStyle(filigreeAccent)
+                            Spacer()
+                            Image(systemName: "chevron.up.chevron.down")
+                                .font(.system(size: 8, weight: .semibold))
+                                .foregroundStyle(filigreeAccent)
+                        }
+                        .padding(.horizontal, 8).padding(.vertical, 5)
+                        .frame(maxWidth: .infinity)
+                        .background(Color.primary.opacity(0.06))
+                        .clipShape(RoundedRectangle(cornerRadius: 5))
+                    }
+                    .menuStyle(.borderlessButton)
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.top, 12)
+            .padding(.bottom, 12)
+
+            Divider()
+
             // Bookmarks section
             VStack(spacing: 0) {
                 Text("BOOKMARKS")
@@ -758,6 +882,128 @@ struct EPUBLibraryView: View {
             .padding(.bottom, 6)
     }
 
+    /// The most recently-opened book that's still present in the library,
+    /// or nil if there's no recent history or the last book was deleted.
+    ///
+    /// Matching is done in two passes to survive library paths drifting
+    /// between runs (iCloud Drive resolving `/private/var/...` prefixes,
+    /// symlink flips, standardisation differences between
+    /// `FileManager.enumerator` URLs and whatever was stored). Exact path
+    /// match is tried first; if that fails, the stored filename is matched
+    /// against the current scan. The fallback makes "Continue Reading"
+    /// survive a library-folder move without requiring the user to
+    /// re-open the book.
+    private func lastReadBook() -> BookFile? {
+        let recents = (try? JSONDecoder().decode([String].self, from: lastOpenedData)) ?? []
+        for recentPath in recents {
+            if let match = bookFiles.first(where: { $0.url.path == recentPath }) {
+                return match
+            }
+            let recentName = (recentPath as NSString).lastPathComponent
+            if !recentName.isEmpty,
+               let match = bookFiles.first(where: { $0.url.lastPathComponent == recentName }) {
+                return match
+            }
+        }
+        return nil
+    }
+
+    /// Prominent "Continue Reading" strip shown above the alphabetical
+    /// grid or the flat list. Uses a layout that fits the current view
+    /// mode: a single row with a small cover in list mode, and a larger
+    /// tile with a prominent "Resume reading" button in the grid modes.
+    /// Heading style is the same across both so users recognise the
+    /// section regardless of view mode.
+    @ViewBuilder
+    private func continueReadingSection(_ book: BookFile) -> some View {
+        if viewMode == "list" {
+            continueReadingRow(book)
+        } else {
+            continueReadingTile(book)
+        }
+    }
+
+    /// Compact "Continue Reading" strip for list view — a single row that
+    /// mirrors the list's visual rhythm, so the section doesn't feel
+    /// pasted on from a different view mode.
+    private func continueReadingRow(_ book: BookFile) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Image(systemName: "book.fill")
+                    .font(.system(size: 10))
+                    .foregroundStyle(filigreeAccent)
+                Text("CONTINUE READING")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(filigreeAccent)
+                    .tracking(1.2)
+                Spacer()
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 12)
+
+            HStack(spacing: 0) {
+                BookListRow(url: book.url, format: book.format, accent: filigreeAccent,
+                            cover: coverStore.covers[book.url.path],
+                            isNew: newBookNames.contains(book.url.lastPathComponent))
+                    .onTapGesture { openBook(book) }
+                    .onAppear { coverStore.loadCover(for: book.url) }
+                favouriteStarButton(for: book.url, compact: false)
+                    .padding(.horizontal, 8)
+            }
+            .padding(.bottom, 4)
+        }
+    }
+
+    /// Large "Continue Reading" tile used in the grid view modes.
+    private func continueReadingTile(_ book: BookFile) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 6) {
+                Image(systemName: "book.fill")
+                    .font(.system(size: 10))
+                    .foregroundStyle(filigreeAccent)
+                Text("CONTINUE READING")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(filigreeAccent)
+                    .tracking(1.2)
+                Spacer()
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 14)
+
+            HStack(alignment: .top, spacing: 14) {
+                bookTile(book, size: .large)
+                    .frame(width: 140)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(cleanTitle(book.url))
+                        .font(.system(size: 14, weight: .semibold))
+                        .lineLimit(2)
+                        .foregroundStyle(.primary)
+                    Text(authorName(book.url))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                    Spacer(minLength: 8)
+                    Button {
+                        openBook(book)
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "book.circle.fill").font(.system(size: 14))
+                            Text("Resume reading").font(.caption.weight(.semibold))
+                        }
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 12).padding(.vertical, 6)
+                        .background(filigreeAccentFill)
+                        .clipShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                }
+                Spacer()
+            }
+            .padding(.horizontal, 20)
+            .padding(.bottom, 14)
+        }
+    }
+
     private func bookTile(_ book: BookFile, size: BookTileSize) -> some View {
         ZStack(alignment: .topTrailing) {
             SimpleBookTile(url: book.url, format: book.format, accent: filigreeAccent,
@@ -765,6 +1011,13 @@ struct EPUBLibraryView: View {
                 .onTapGesture { openBook(book) }
                 .onAppear { coverStore.loadCover(for: book.url) }
                 .contextMenu {
+                    Button {
+                        favourites.toggle(book.url)
+                    } label: {
+                        Label(favourites.isFavourite(book.url) ? "Remove from Favourites" : "Add to Favourites",
+                              systemImage: favourites.isFavourite(book.url) ? "star.slash" : "star")
+                    }
+                    Divider()
                     Button(role: .destructive) { bookToDelete = book } label: {
                         Label("Delete", systemImage: "trash")
                     }
@@ -779,7 +1032,37 @@ struct EPUBLibraryView: View {
                     .clipShape(Capsule())
                     .offset(x: -4, y: 4)
             }
+            // Star button overlaid at the end of the title line. SimpleBookTile
+            // already renders a title; we position the star in its bottom-right
+            // so it sits on the same horizontal as the title text.
+            VStack {
+                Spacer()
+                HStack {
+                    Spacer()
+                    favouriteStarButton(for: book.url, compact: size == .small)
+                        .padding(.trailing, 4)
+                        .padding(.bottom, 2)
+                }
+            }
         }
+    }
+
+    /// Small star button shown at the end of a book's title. Uses the
+    /// filigree accent colour when starred, tertiary grey when not —
+    /// keeps the app's palette consistent, no arbitrary hues.
+    @ViewBuilder
+    private func favouriteStarButton(for url: URL, compact: Bool) -> some View {
+        let isFav = favourites.isFavourite(url)
+        Button {
+            favourites.toggle(url)
+        } label: {
+            Image(systemName: isFav ? "star.fill" : "star")
+                .font(.system(size: compact ? 10 : 12, weight: .semibold))
+                .foregroundStyle(isFav ? filigreeAccent : Color.secondary.opacity(0.55))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(isFav ? "Remove from favourites" : "Add to favourites")
     }
 
     private func openBook(_ book: BookFile) {

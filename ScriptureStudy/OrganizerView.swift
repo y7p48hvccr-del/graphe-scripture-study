@@ -532,7 +532,7 @@ struct OrganizerView: View {
         .menuStyle(.borderlessButton)
     }
 
-    private func navigateToPlan(_ plan: PlanEntry) {
+    private func navigateToPlan(_ plan: MyBibleService.PlanEntry) {
         NotificationCenter.default.post(
             name: .navigateToPassage, object: nil,
             userInfo: ["bookNumber": plan.bookNumber, "chapter": plan.startChapter])
@@ -579,7 +579,7 @@ struct OrganizerView: View {
             }
 
             // Load reading plan entry
-            let planEntry: PlanEntry? = await loadPlanEntry(day: dayNum)
+            let planEntry: MyBibleService.PlanEntry? = await loadPlanEntry(day: dayNum)
 
             await MainActor.run {
                 dayDetail = DayDetail(
@@ -592,34 +592,11 @@ struct OrganizerView: View {
         }
     }
 
-    private func loadPlanEntry(day: Int) async -> PlanEntry? {
+    /// Delegates to the shared MyBibleService implementation so both the
+    /// Organiser and the Devotional page read from the same plan source.
+    private func loadPlanEntry(day: Int) async -> MyBibleService.PlanEntry? {
         guard let module = planModule else { return nil }
-        return await Task.detached(priority: .userInitiated) {
-            var db: OpaquePointer?
-            guard sqlite3_open_v2(module.filePath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK
-            else { return nil }
-            defer { sqlite3_close(db) }
-
-            var stmt: OpaquePointer?
-            let sql = "SELECT book_number, start_chapter, start_verse, end_chapter, end_verse FROM reading_plan WHERE day=? AND book_number != 'day' LIMIT 1"
-            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
-            sqlite3_bind_int(stmt, 1, Int32(day))
-            guard sqlite3_step(stmt) == SQLITE_ROW else { sqlite3_finalize(stmt); return nil }
-
-            let bookNum    = Int(sqlite3_column_int(stmt, 0))
-            let startCh    = Int(sqlite3_column_int(stmt, 1))
-            let startVs    = sqlite3_column_type(stmt, 2) != SQLITE_NULL ? Int(sqlite3_column_int(stmt, 2)) : nil
-            let endCh      = sqlite3_column_type(stmt, 3) != SQLITE_NULL ? Int(sqlite3_column_int(stmt, 3)) : nil
-            let endVs      = sqlite3_column_type(stmt, 4) != SQLITE_NULL ? Int(sqlite3_column_int(stmt, 4)) : nil
-            sqlite3_finalize(stmt)
-
-            let bookName = myBibleBookNumbers[bookNum] ?? "\(bookNum)"
-            var display  = "\(bookName) \(startCh)"
-            if let sv = startVs { display += ":\(sv)" }
-            if let ec = endCh, let ev = endVs { display += " – \(bookName) \(ec):\(ev)" }
-
-            return PlanEntry(bookNumber: bookNum, startChapter: startCh, displayText: display)
-        }.value
+        return await myBible.loadPlanEntry(day: day, from: module)
     }
 }
 
@@ -876,13 +853,7 @@ struct FacePlaceholderIcon: View {
 struct DayDetail {
     let date:            Date
     let devotionalTitle: String?
-    let planEntry:       PlanEntry?
-}
-
-struct PlanEntry {
-    let bookNumber:   Int
-    let startChapter: Int
-    let displayText:  String
+    let planEntry:       MyBibleService.PlanEntry?
 }
 
 struct PrayerItem: Identifiable, Codable {

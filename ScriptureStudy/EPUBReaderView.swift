@@ -2,6 +2,19 @@ import SwiftUI
 import WebKit
 import ZIPFoundation
 
+// BOOKMARK_FIX_V7 — 2026-04-20 — abandoned overlay approach entirely.
+// Bookmark button moved into the existing .toolbar modifier as another
+// ToolbarItem (native macOS pattern — Safari, Preview, Books app all do
+// this). Search bar converted from overlay to a real VStack child at the
+// top of the reader; claims layout space when showSearch is true and
+// physically pushes the WebView below it.
+// Diagnosis: SwiftUI overlays are not rendering in this view tree
+// (HSplitView > ZStack > NSViewRepresentable). Tried overlays on the
+// NSViewRepresentable (V5) and the ZStack (V6) — neither rendered. The
+// bookmark icon was invisible regardless of placement, which ruled
+// overlay rendering out as a viable mechanism here. Plain VStack/HStack
+// children and ToolbarItems are the reliable path.
+
 /// Serial queue for all ZIPFoundation Archive access — Archive is NOT thread-safe.
 private let epubArchiveQueue = DispatchQueue(label: "com.graphe.epub.archive", qos: .userInitiated)
 
@@ -58,72 +71,14 @@ struct EPUBReaderView: View {
                 #if os(macOS)
                 HSplitView {
                     tocSidebar(book: book).frame(minWidth: 200, maxWidth: 260)
-                    ZStack(alignment: .bottom) {
-                    if let arc = archive, !currentHref.isEmpty {
-                        ZStack(alignment: .topTrailing) {
-                        EPUBPageView(href: currentHref, archive: arc, theme: theme,
-                                     fontSize: epubFontSize, fontName: fontName,
-                                     onNavigate: { target in
-                                         let base = (currentHref as NSString).deletingLastPathComponent
-                                         let newHref = base.isEmpty ? target : "\(base)/\(target)"
-                                         currentHref  = newHref
-                                         if let item = findTOCItem(href: newHref, in: toc) {
-                                             currentTitle = item.title
-                                         }
-                                     },
-                                     restoreScrollY: restoreScrollY,
-                                     onScrollY:      { y in currentScrollY = y },
-                                     searchQuery:    searchQuery,
-                                     searchStep:     searchIndex,
-                                     searchForward:  true,
-                                     onSearchCount:  { n in searchCount = n; searchIndex = 0 },
-                                     onSearchIndex:  { i in searchIndex = i })
-                            .id(currentHref)
-                            Button { toggleBookmark() } label: {
-                                Image(systemName: isBookmarked ? "bookmark.fill" : "bookmark")
-                                    .font(.system(size: 22))
-                                    .foregroundStyle(isBookmarked ? Color(red: 0.25, green: 0.45, blue: 0.75) : Color.secondary.opacity(0.3))
-                                    .padding(12)
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    } else {
-                        VStack {
-                            Spacer()
-                            Image(systemName: "book.closed")
-                                .font(.system(size: 48)).foregroundStyle(.quaternary)
-                            Text("Select a chapter from the contents")
-                                .foregroundStyle(.secondary)
-                            Spacer()
-                        }
-                        .frame(maxWidth: .infinity).background(theme.background)
-                    }
-                    if showScripturePanel, let ref = scriptureRef {
-                        VStack(spacing: 0) {
-                            Capsule().fill(Color.secondary.opacity(0.3))
-                                .frame(width: 36, height: 4).padding(.top, 8)
-                            ScriptureSlideUpPanel(
-                                ref: ref,
-                                onDismiss: { withAnimation(.spring(response: 0.35)) { showScripturePanel = false } },
-                                onOpenInBible: { r in
-                                    showScripturePanel = false
-                                    let resolved = ScriptureReferenceParser.resolveBookNumber(r, in: myBible)
-                                    NotificationCenter.default.post(
-                                        name: Notification.Name("navigateToPassage"), object: nil,
-                                        userInfo: ["bookNumber": resolved.bookNumber, "chapter": resolved.chapter, "verse": resolved.verse])
-                                }
-                            ).environmentObject(myBible)
-                        }
-                        .frame(maxWidth: .infinity).frame(height: 380)
-                        .background(Color.platformWindowBg)
-                        .clipShape(RoundedRectangle(cornerRadius: 16))
-                        .shadow(color: .black.opacity(0.2), radius: 12, x: 0, y: -4)
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
-                        .zIndex(10)
-                    }
-                    // Search bar
-                    if showSearch {
-                        VStack(spacing: 0) {
+                    VStack(spacing: 0) {
+                        // Search bar as a real VStack child — claims real
+                        // layout space at the top when shown, physically
+                        // pushes the reader below it. V7 step away from
+                        // overlays, which weren't rendering in this view
+                        // tree (HSplitView + NSViewRepresentable child
+                        // apparently swallows overlay content).
+                        if showSearch {
                             HStack(spacing: 8) {
                                 Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
                                 TextField("Search in this book…", text: $searchQuery)
@@ -149,11 +104,65 @@ struct EPUBReaderView: View {
                             .background(Color.platformWindowBg)
                             Divider()
                         }
-                        .transition(.move(edge: .top).combined(with: .opacity))
-                        .zIndex(20)
-                    }
-                    } // end ZStack(.bottom)
-                    .animation(.spring(response: 0.35), value: showScripturePanel)
+
+                        ZStack(alignment: .bottom) {
+                        if let arc = archive, !currentHref.isEmpty {
+                            EPUBPageView(href: currentHref, archive: arc, theme: theme,
+                                         fontSize: epubFontSize, fontName: fontName,
+                                         onNavigate: { target in
+                                             let base = (currentHref as NSString).deletingLastPathComponent
+                                             let newHref = base.isEmpty ? target : "\(base)/\(target)"
+                                             currentHref  = newHref
+                                             if let item = findTOCItem(href: newHref, in: toc) {
+                                                 currentTitle = item.title
+                                             }
+                                         },
+                                         restoreScrollY: restoreScrollY,
+                                         onScrollY:      { y in currentScrollY = y },
+                                         searchQuery:    searchQuery,
+                                         searchStep:     searchIndex,
+                                         searchForward:  true,
+                                         onSearchCount:  { n in searchCount = n; searchIndex = 0 },
+                                         onSearchIndex:  { i in searchIndex = i })
+                                .id(currentHref)
+                        } else {
+                            VStack {
+                                Spacer()
+                                Image(systemName: "book.closed")
+                                    .font(.system(size: 48)).foregroundStyle(.quaternary)
+                                Text("Select a chapter from the contents")
+                                    .foregroundStyle(.secondary)
+                                Spacer()
+                            }
+                            .frame(maxWidth: .infinity).background(theme.background)
+                        }
+                        if showScripturePanel, let ref = scriptureRef {
+                            VStack(spacing: 0) {
+                                Capsule().fill(Color.secondary.opacity(0.3))
+                                    .frame(width: 36, height: 4).padding(.top, 8)
+                                ScriptureSlideUpPanel(
+                                    ref: ref,
+                                    onDismiss: { withAnimation(.spring(response: 0.35)) { showScripturePanel = false } },
+                                    onOpenInBible: { r in
+                                        showScripturePanel = false
+                                        let resolved = ScriptureReferenceParser.resolveBookNumber(r, in: myBible)
+                                        NotificationCenter.default.post(
+                                            name: Notification.Name("navigateToPassage"), object: nil,
+                                            userInfo: ["bookNumber": resolved.bookNumber, "chapter": resolved.chapter, "verse": resolved.verse])
+                                    }
+                                ).environmentObject(myBible)
+                            }
+                            .frame(maxWidth: .infinity).frame(height: 380)
+                            .background(Color.platformWindowBg)
+                            .clipShape(RoundedRectangle(cornerRadius: 16))
+                            .shadow(color: .black.opacity(0.2), radius: 12, x: 0, y: -4)
+                            .transition(.move(edge: .bottom).combined(with: .opacity))
+                            .zIndex(10)
+                        }
+                        } // end ZStack(.bottom)
+                        .animation(.spring(response: 0.35), value: showScripturePanel)
+                    } // end VStack
+                    .animation(.spring(response: 0.3), value: showSearch)
                 }
                 .onReceive(NotificationCenter.default.publisher(for: .scriptureRefTapped)) { note in
                     if let ref = note.userInfo?["ref"] as? ScriptureRef {
@@ -178,6 +187,18 @@ struct EPUBReaderView: View {
                                 Image(systemName: "magnifyingglass")
                                     .foregroundStyle(showSearch ? accent : .primary)
                             }.help("Search in this book")
+                            // Bookmark button moved into the window toolbar
+                            // (V7). Previously lived as an overlay on the
+                            // reading content, which wasn't rendering in
+                            // this view tree. Toolbar placement is the
+                            // native macOS pattern anyway (Safari, Preview,
+                            // Books app all do this).
+                            if archive != nil && !currentHref.isEmpty {
+                                Button { toggleBookmark() } label: {
+                                    Image(systemName: isBookmarked ? "bookmark.fill" : "bookmark")
+                                        .foregroundStyle(isBookmarked ? accent : .primary)
+                                }.help(isBookmarked ? "Remove bookmark" : "Bookmark this page")
+                            }
                         }
                     }
                 }

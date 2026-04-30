@@ -157,6 +157,7 @@ class NotesManager: ObservableObject {
     func save(_ note: Note) {
         var updated       = note
         updated.updatedAt = Date()
+        print("[NOTE DEBUG] save() called for id=\(note.id), notes.count BEFORE = \(notes.count)")
 
         let coordinator = NSFileCoordinator()
         var error: NSError?
@@ -165,21 +166,33 @@ class NotesManager: ObservableObject {
         removeFile(for: note.id, coordinator: coordinator)
 
         let url = uniqueURL(for: updated)
+        print("[NOTE DEBUG] save() writing to url = \(url.lastPathComponent)")
 
         coordinator.coordinate(writingItemAt: url,
                                 options: .forReplacing,
                                 error: &error) { writeURL in
-            try? updated.fileText.write(to: writeURL,
-                                        atomically: true,
-                                        encoding: .utf8)
+            do {
+                try updated.fileText.write(to: writeURL,
+                                           atomically: true,
+                                           encoding: .utf8)
+                print("[NOTE DEBUG] save() wrote file successfully")
+            } catch {
+                print("[NOTE DEBUG] save() FILE WRITE FAILED: \(error)")
+            }
+        }
+        if let err = error {
+            print("[NOTE DEBUG] save() coordinator error: \(err)")
         }
 
         if let idx = notes.firstIndex(where: { $0.id == note.id }) {
             notes[idx] = updated
+            print("[NOTE DEBUG] save() updated existing at index \(idx)")
         } else {
             notes.insert(updated, at: 0)
+            print("[NOTE DEBUG] save() inserted new at index 0")
         }
         notes.sort { $0.updatedAt > $1.updatedAt }
+        print("[NOTE DEBUG] save() complete, notes.count AFTER = \(notes.count)")
         if selectedNote?.id == note.id { selectedNote = updated }
     }
 
@@ -194,24 +207,62 @@ class NotesManager: ObservableObject {
         note.chapterNumber = chapter
         note.verseNumbers  = verses
         if bookNumber > 0 { note.title = note.verseReference }
+        print("[NOTE DEBUG] NotesManager.createNote building note id=\(note.id) title=\(note.title)")
         save(note)
+        print("[NOTE DEBUG] NotesManager.createNote after save(), notes.count=\(notes.count)")
         selectedNote = note
-        // Notify Organizer so it opens this note in the editor
-        if bookNumber > 0 {
-            DispatchQueue.main.async {
-                NotificationCenter.default.post(
-                    name: Notification.Name("noteCreatedFromVerse"),
-                    object: nil,
-                    userInfo: ["note": note]
-                )
-            }
-        }
         return note
     }
 
-    // MARK: - Delete
+    // MARK: - Delete / Archive / Trash
+    //
+    // Design (2026-04-21):
+    //  - delete(_:)           — moves to Trash (sets deletedAt)
+    //  - archive(_:) / unarchive(_:) — soft-hide; separate from trash
+    //  - restore(_:)          — clears deletedAt
+    //  - deletePermanently(_:) — removes the file from disk, gone
+    //  - emptyTrash()         — deletePermanently for every trashed note
+    //  - deleteIfEmpty(_:)    — still a hard delete (silent auto-cleanup
+    //                           of empty notes shouldn't accumulate junk
+    //                           in the user's Trash)
 
+    /// Move a note to Trash. Recoverable via restore(_:). Trash is kept
+    /// forever until the user empties it via emptyTrash().
     func delete(_ note: Note) {
+        var updated = note
+        updated.deletedAt = Date()
+        save(updated)
+        if selectedNote?.id == note.id {
+            selectedNote = nil
+        }
+    }
+
+    /// Restore a note from Trash to the active list.
+    func restore(_ note: Note) {
+        var updated = note
+        updated.deletedAt = nil
+        save(updated)
+    }
+
+    /// Toggle archive state. Archived notes are hidden from the main
+    /// list; the "Show archived" toggle surfaces them. Archive does
+    /// NOT move the note to Trash.
+    func archive(_ note: Note) {
+        var updated = note
+        updated.isArchived = true
+        save(updated)
+    }
+
+    func unarchive(_ note: Note) {
+        var updated = note
+        updated.isArchived = false
+        save(updated)
+    }
+
+    /// Hard-delete a single note — removes the file, gone. Called from
+    /// Trash view "Delete permanently" action; NOT called directly by
+    /// normal delete affordances.
+    func deletePermanently(_ note: Note) {
         let coordinator = NSFileCoordinator()
         removeFile(for: note.id, coordinator: coordinator)
         notes.removeAll { $0.id == note.id }
@@ -220,15 +271,24 @@ class NotesManager: ObservableObject {
         }
     }
 
+    /// Permanently delete every note currently in Trash.
+    func emptyTrash() {
+        let trashed = notes.filter { $0.deletedAt != nil }
+        for n in trashed { deletePermanently(n) }
+    }
+
     // MARK: - Auto-delete empty notes
 
+    /// Silent cleanup when the user navigates away from an empty,
+    /// untouched note. Hard-deletes — we don't want the Trash filling
+    /// up with empty "Untitled" placeholders.
     @discardableResult
     func deleteIfEmpty(_ note: Note) -> Bool {
         let hasContent = !note.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         let hasTitle   = !note.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                           && note.title != note.verseReference
         if !hasContent && !hasTitle {
-            delete(note)
+            deletePermanently(note)
             return true
         }
         return false
@@ -236,8 +296,13 @@ class NotesManager: ObservableObject {
 
     // MARK: - Verse lookups
 
+    /// Notes attached to a specific verse. Excludes archived and
+    /// trashed notes — only returns active notes that should trigger
+    /// the inline blue note icon in the Bible reader.
     func notes(forBook book: Int, chapter: Int, verse: Int) -> [Note] {
         notes.filter {
+            !$0.isArchived &&
+            $0.deletedAt == nil &&
             $0.bookNumber    == book &&
             $0.chapterNumber == chapter &&
             ($0.verseNumbers.isEmpty || $0.verseNumbers.contains(verse))

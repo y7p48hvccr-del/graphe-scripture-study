@@ -63,9 +63,12 @@ struct VerseWithStrongsView: View {
     let strongsModule: MyBibleModule?
     let isSelected:    Bool
     let hasNote:       Bool
+    let isBookmarked:  Bool
     let linkedNotes:   [Note]
     let onTapVerseNum:       () -> Void   // kept for compatibility, not used directly
     let onLongPressVerseNum: () -> Void   // kept for compatibility, not used directly
+    let onToggleBookmark:    () -> Void
+    let onAddNote:           () -> Void
 
     @EnvironmentObject var myBible:      MyBibleService
     @EnvironmentObject var notesManager: NotesManager
@@ -127,21 +130,87 @@ struct VerseWithStrongsView: View {
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
 
-            // ── Verse number ──────────────────────────────────────────
-            Text("\(verse.verse)")
-                .font(.system(size: 11, weight: .bold))
-                .foregroundStyle(isSelected ? .white : filigreeAccent.opacity(0.7))
-                .frame(minWidth: 18, alignment: .trailing)
-                .padding(.horizontal, 3).padding(.vertical, 2)
-                .background(isSelected ? filigreeAccent : Color.clear)
-                .clipShape(RoundedRectangle(cornerRadius: 4))
-                .onTapGesture {
-                    commentaryAvailable = myBible.visibleModules.contains {
-                        $0.type == .commentary
+            // ── Gutter column (verse number + status icons) ──────────
+            // Fixed-width VStack. When the verse is bookmarked, the
+            // verse number renders *inside* a BookmarkRibbon shape
+            // (ox-blood ribbon with white text — the verse number
+            // stays the same visual size as unbookmarked ones; the
+            // bookmark shape is just the container around it). When a
+            // note exists, the blue note icon sits below in the same
+            // column. Verse text always starts at the same x-position.
+            VStack(alignment: .center, spacing: 3) {
+
+                // ── Verse number (plain or in bookmark ribbon) ───────
+                Group {
+                    if isBookmarked {
+                        // Ribbon container — same text size as plain
+                        // verse number, white for contrast against the
+                        // ox-blood shape. Tap = popover (same as plain).
+                        // Right-click = context menu for quick remove.
+                        ZStack {
+                            BookmarkRibbon()
+                                .fill(SilkBookmarkRibbonView.silkRed)
+                                .frame(width: 14, height: 20)
+                            Text("\(verse.verse)")
+                                .font(.system(size: 11, weight: .bold))
+                                .foregroundStyle(Color.white)
+                                .offset(y: -1)   // centre in the non-notched part
+                        }
+                        .onTapGesture {
+                            commentaryAvailable = myBible.visibleModules.contains {
+                                $0.type == .commentary
+                            }
+                            activePopover = .verse
+                        }
+                        .contextMenu {
+                            Button(role: .destructive) {
+                                onToggleBookmark()
+                            } label: {
+                                Label("Remove Bookmark", systemImage: "bookmark.slash")
+                            }
+                        }
+                        .help("Tap for options · right-click to remove bookmark")
+                    } else {
+                        Text("\(verse.verse)")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundStyle(isSelected ? .white : filigreeAccent.opacity(0.7))
+                            .frame(minWidth: 18, alignment: .trailing)
+                            .padding(.horizontal, 3).padding(.vertical, 2)
+                            .background(isSelected ? filigreeAccent : Color.clear)
+                            .clipShape(RoundedRectangle(cornerRadius: 4))
+                            .onTapGesture {
+                                commentaryAvailable = myBible.visibleModules.contains {
+                                    $0.type == .commentary
+                                }
+                                activePopover = .verse
+                            }
+                            .help("Tap for options")
                     }
-                    activePopover = .verse
                 }
-                .help("Tap for options")
+
+                if hasNote {
+                    Button {
+                        NotificationCenter.default.post(
+                            name: Notification.Name("showNotesForVerse"),
+                            object: nil,
+                            userInfo: [
+                                "bookNumber": verse.book,
+                                "chapter":    verse.chapter,
+                                "verse":      verse.verse
+                            ]
+                        )
+                    } label: {
+                        Image(systemName: "note.text")
+                            .font(.system(size: 12))    // bumped from 10 → 12 to pair visually with the bookmark ribbon
+                            .foregroundStyle(Color(red: 0.30, green: 0.50, blue: 0.75))
+                    }
+                    .buttonStyle(.plain)
+                    .help(linkedNotes.count > 1
+                          ? "\(linkedNotes.count) notes"
+                          : "View note")
+                }
+            }
+            .frame(width: 28, alignment: .center)
 
             // ── Verse text ────────────────────────────────────────────
             FlowLayout(hSpacing: 3, vSpacing: 5) {
@@ -199,22 +268,8 @@ struct VerseWithStrongsView: View {
             .onReceive(NotificationCenter.default.publisher(
                 for: Notification.Name("strongsFlashOff"))) { _ in strongsFlash = false }
 
-            // ── Note indicator ────────────────────────────────────────
-            if hasNote {
-                Button {
-                    NotificationCenter.default.post(
-                        name: Notification.Name("showVerseNotes"),
-                        object: nil,
-                        userInfo: ["notes": linkedNotes]
-                    )
-                } label: {
-                    Image(systemName: "note.text")
-                        .font(.system(size: 10))
-                        .foregroundStyle(filigreeAccent)
-                }
-                .buttonStyle(.plain)
-                .help("View note")
-            }
+            // Note indicator moved inline next to the verse number
+            // (above), alongside the bookmark icon.
         }
         .padding(.horizontal, 6).padding(.vertical, 3)
         .background(isSelected ? filigreeAccentFill.opacity(0.20) : Color.clear)
@@ -271,16 +326,22 @@ struct VerseWithStrongsView: View {
                 icon:  "square.and.pencil",
                 enabled: true
             ) {
+                print("[NOTE DEBUG] popover Make a Note tapped — closure entered")
                 activePopover = nil
-                NotificationCenter.default.post(
-                    name: Notification.Name("createNoteForVerse"),
-                    object: nil,
-                    userInfo: [
-                        "bookNumber": verse.book,
-                        "chapter":    verse.chapter,
-                        "verse":      verse.verse
-                    ]
-                )
+                print("[NOTE DEBUG] popover about to call onAddNote()")
+                onAddNote()
+                print("[NOTE DEBUG] popover onAddNote() returned")
+            }
+
+            Divider().padding(.leading, 14)
+
+            popoverButton(
+                label: isBookmarked ? "Remove Bookmark" : "Bookmark Verse",
+                icon:  isBookmarked ? "bookmark.slash" : "bookmark",
+                enabled: true
+            ) {
+                activePopover = nil
+                onToggleBookmark()
             }
 
             Spacer().frame(height: 8)
@@ -393,6 +454,7 @@ struct VerseWithStrongsView: View {
     private func popoverButton(label: String, icon: String,
                                 enabled: Bool, action: @escaping () -> Void) -> some View {
         Button {
+            print("[NOTE DEBUG] popoverButton tapped — label=\(label) enabled=\(enabled)")
             if enabled { action() }
         } label: {
             HStack(spacing: 10) {

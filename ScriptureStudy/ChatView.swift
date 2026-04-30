@@ -1,4 +1,5 @@
 import SwiftUI
+
 struct ChatView: View {
     @AppStorage("fontSize") private var fontSize: Double = 16
     @AppStorage("fontName") private var fontName: String = ""
@@ -7,7 +8,10 @@ struct ChatView: View {
         return .custom(fontName, size: fontSize)
     }
 
-    @EnvironmentObject var ollama: OllamaService
+    @EnvironmentObject var ollama:      OllamaService
+    @EnvironmentObject var chatHistory: ChatHistoryManager
+    @EnvironmentObject var myBible:     MyBibleService
+
     @AppStorage("themeID") private var themeID: String = "light"
 
     @State private var messages:      [ChatMessage] = []
@@ -21,127 +25,163 @@ struct ChatView: View {
     ]
 
     var body: some View {
+        #if os(macOS)
+        HSplitView {
+            ChatHistorySidebar(onSwitchRequest: handleSwitch)
+                .frame(minWidth: 280, idealWidth: 320, maxWidth: 380)
+            chatBody
+        }
+        #else
+        // iOS keeps its existing single-column layout for now.
+        chatBody
+        #endif
+    }
+
+    // MARK: - Chat body (unchanged content, just wrapped)
+
+    private var chatBody: some View {
         ZStack {
             AICircuitBackground(themeID: themeID)
                 .ignoresSafeArea()
             VStack(spacing: 0) {
 
-            // Ollama not running banner
-            if !ollama.ollamaReady {
-                HStack(spacing: 8) {
-                    Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
-                    Text("Ollama not detected. See the Settings tab for setup instructions.")
-                        .font(.caption)
-                    Spacer()
-                    Button("Retry") { Task { await ollama.checkOllama() } }
-                        .controlSize(.small)
-                }
-                .padding(.horizontal).padding(.vertical, 8)
-                .background(Color.orange.opacity(0.1))
-            }
-
-            // Input bar at top
-            HStack(spacing: 10) {
-                TextField("Ask about scripture, theology, history…", text: $inputText)
-                    .textFieldStyle(.roundedBorder)
-                    .onSubmit { Task { await send() } }
-                Button {
-                    Task { await send() }
-                } label: {
-                    Image(systemName: "arrow.up.circle.fill")
-                        .font(.system(size: 28))
-                        .foregroundStyle(
-                            inputText.isEmpty || ollama.isLoading
-                            ? .secondary
-                            : Color(red: 0.1, green: 0.15, blue: 0.27)
-                        )
-                }
-                .buttonStyle(.plain)
-                .disabled(inputText.isEmpty || ollama.isLoading)
-            }
-            .padding()
-
-            Divider()
-
-            // Suggestion chips (shown when no conversation yet)
-            if messages.isEmpty && ollama.chapterSummary.isEmpty {
-                ScrollView(.horizontal, showsIndicators: true) {
+                // Ollama not running banner
+                if !ollama.ollamaReady {
                     HStack(spacing: 8) {
-                        ForEach(suggestions, id: \.self) { s in
-                            Button(s) { inputText = s; Task { await send() } }
-                                .buttonStyle(.bordered).controlSize(.small)
-                        }
+                        Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                        Text("Ollama not detected. See the Settings tab for setup instructions.")
+                            .font(.caption)
+                        Spacer()
+                        Button("Retry") { Task { await ollama.checkOllama() } }
+                            .controlSize(.small)
                     }
-                    .padding(.horizontal)
+                    .padding(.horizontal).padding(.vertical, 8)
+                    .background(Color.orange.opacity(0.1))
                 }
-                .padding(.vertical, 8)
+
+                // Input bar at top
+                HStack(spacing: 10) {
+                    TextField("Ask about scripture, theology, history…", text: $inputText)
+                        .textFieldStyle(.roundedBorder)
+                        .onSubmit { Task { await send() } }
+                    Button {
+                        Task { await send() }
+                    } label: {
+                        Image(systemName: "arrow.up.circle.fill")
+                            .font(.system(size: 28))
+                            .foregroundStyle(
+                                inputText.isEmpty || ollama.isLoading
+                                ? .secondary
+                                : Color(red: 0.1, green: 0.15, blue: 0.27)
+                            )
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(inputText.isEmpty || ollama.isLoading)
+                }
+                .padding()
+
                 Divider()
-            }
 
-            // Content area — summary then conversation
-            ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 12) {
-
-                        // Book overview card (chapter 1 only)
-                        if !ollama.bookSummary.isEmpty {
-                            SummaryCard(
-                                title: "Book Overview — \(ollama.bookName)",
-                                icon: "books.vertical.fill",
-                                content: ollama.bookSummary,
-                                resolvedFont: resolvedFont
-                            ) {
-                                ollama.bookSummary    = ""
-                                ollama.bookSummaryReady = false
+                // Suggestion chips (shown when no conversation yet)
+                if messages.isEmpty && ollama.chapterSummary.isEmpty {
+                    ScrollView(.horizontal, showsIndicators: true) {
+                        HStack(spacing: 8) {
+                            ForEach(suggestions, id: \.self) { s in
+                                Button(s) { inputText = s; Task { await send() } }
+                                    .buttonStyle(.bordered).controlSize(.small)
                             }
                         }
-
-                        // Chapter summary card
-                        if ollama.summaryIsLoading {
-                            HStack(spacing: 8) {
-                                ProgressView().controlSize(.small)
-                                Text("Generating summary for \(ollama.summaryPassage)…")
-                                    .font(.caption).foregroundStyle(.secondary)
-                                Spacer()
-                            }
-                            .padding(.horizontal, 14).padding(.vertical, 10)
-                            .background(Color.secondary.opacity(0.08))
-                            .clipShape(RoundedRectangle(cornerRadius: 10))
-                            .padding(.horizontal)
-                        } else if !ollama.chapterSummary.isEmpty {
-                            SummaryCard(
-                                title: "Chapter Summary — \(ollama.summaryPassage)",
-                                icon: "text.book.closed.fill",
-                                content: ollama.chapterSummary,
-                                resolvedFont: resolvedFont
-                            ) {
-                                ollama.chapterSummary = ""
-                                ollama.summaryReady   = false
-                            }
-                        }
-
-                        // Conversation messages
-                        ForEach(messages) { message in
-                            MessageBubble(message: message)
-                        }
-
-                        if ollama.isLoading { TypingIndicator() }
-
-                        if let error = errorMessage {
-                            Text(error).font(.caption).foregroundStyle(.red).padding(.horizontal)
-                        }
-
-                        Color.clear.frame(height: 1).id("bottom")
+                        .padding(.horizontal)
                     }
-                    .padding(.vertical)
+                    .padding(.vertical, 8)
+                    Divider()
                 }
-                .onChange(of: messages.count)          { withAnimation { proxy.scrollTo("bottom") } }
-                .onChange(of: ollama.isLoading)        { withAnimation { proxy.scrollTo("bottom") } }
-                .onChange(of: ollama.chapterSummary)   { withAnimation { proxy.scrollTo("bottom") } }
+
+                // Content area — summary then conversation
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 12) {
+
+                            // Book overview card (chapter 1 only)
+                            if !ollama.bookSummary.isEmpty {
+                                SummaryCard(
+                                    title: "Book Overview — \(ollama.bookName)",
+                                    icon: "books.vertical.fill",
+                                    content: ollama.bookSummary,
+                                    resolvedFont: resolvedFont
+                                ) {
+                                    ollama.bookSummary      = ""
+                                    ollama.bookSummaryReady = false
+                                }
+                            }
+
+                            // Chapter summary card
+                            if ollama.summaryIsLoading {
+                                HStack(spacing: 8) {
+                                    ProgressView().controlSize(.small)
+                                    Text("Generating summary for \(ollama.summaryPassage)…")
+                                        .font(.caption).foregroundStyle(.secondary)
+                                    Spacer()
+                                }
+                                .padding(.horizontal, 14).padding(.vertical, 10)
+                                .background(Color.secondary.opacity(0.08))
+                                .clipShape(RoundedRectangle(cornerRadius: 10))
+                                .padding(.horizontal)
+                            } else if !ollama.chapterSummary.isEmpty {
+                                SummaryCard(
+                                    title: "Chapter Summary — \(ollama.summaryPassage)",
+                                    icon: "text.book.closed.fill",
+                                    content: ollama.chapterSummary,
+                                    resolvedFont: resolvedFont
+                                ) {
+                                    ollama.chapterSummary = ""
+                                    ollama.summaryReady   = false
+                                }
+                            }
+
+                            // Conversation messages
+                            ForEach(messages) { message in
+                                MessageBubble(message: message)
+                            }
+
+                            if ollama.isLoading { TypingIndicator() }
+
+                            if let error = errorMessage {
+                                Text(error).font(.caption).foregroundStyle(.red).padding(.horizontal)
+                            }
+
+                            Color.clear.frame(height: 1).id("bottom")
+                        }
+                        .padding(.vertical)
+                    }
+                    .onChange(of: messages.count)          { withAnimation { proxy.scrollTo("bottom") } }
+                    .onChange(of: ollama.isLoading)        { withAnimation { proxy.scrollTo("bottom") } }
+                    .onChange(of: ollama.chapterSummary)   { withAnimation { proxy.scrollTo("bottom") } }
+                }
             }
-        }
         }  // ZStack
     }
+
+    // MARK: - Sidebar switching
+    //
+    // When the user taps "+ New" or picks another thread, we're about to
+    // replace `messages`. Persist the current thread first (it's already
+    // being saved after each exchange, but this catches any in-flight
+    // state), then swap.
+
+    private func handleSwitch(_ action: ChatHistorySidebar.SwitchAction) {
+        switch action {
+        case .newChat:
+            messages = []
+            errorMessage = nil
+            chatHistory.startNewChat()
+        case .open(let thread):
+            messages = chatHistory.openThread(thread)
+            errorMessage = nil
+        }
+    }
+
+    // MARK: - Send
 
     private func send() async {
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -153,6 +193,13 @@ struct ChatView: View {
         do {
             let reply = try await ollama.send(history: history, userMessage: text)
             messages.append(ChatMessage(role: "assistant", content: reply))
+            // Persist after a successful exchange. If this is the first
+            // message in a new chat, the manager creates the thread now
+            // and tags it with the current reading passage.
+            chatHistory.save(messages:       messages,
+                             bookNumber:     myBible.currentBookNumber,
+                             chapterNumber:  myBible.currentChapter,
+                             verseNumbers:   [])
         } catch {
             errorMessage = error.localizedDescription
             messages.removeLast()

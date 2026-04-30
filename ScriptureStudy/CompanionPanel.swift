@@ -15,11 +15,67 @@ enum CompanionMode: String, CaseIterable {
     case web          = "Web"
 }
 
+/// Which slice of the unified saved list is visible. Active is the
+/// default; Archived shows notes the user has tucked away; Trash
+/// shows items pending permanent deletion (kept forever until the
+/// user empties the Trash).
+enum SavedView: String, CaseIterable {
+    case active   = "Active"
+    case archived = "Archived"
+    case trash    = "Trash"
+}
+
+/// Filter for the unified Notes tab list. Drives the three pills
+/// (All / Notes / Bookmarks) at the top of the list.
+enum SavedFilter: String, CaseIterable {
+    case all       = "All"
+    case notes     = "Notes"
+    case bookmarks = "Bookmarks"
+}
+
+/// Lightweight identity for a specific verse — used as the Notes tab's
+/// optional verse filter when the user wants to see only notes for one
+/// passage (via the inline note icon or the popover "Make a Note"
+/// action).
+struct VerseKey: Equatable {
+    let bookNumber: Int
+    let chapter:    Int
+    let verse:      Int
+
+    var displayTitle: String {
+        let bookName = myBibleBookNumbers[bookNumber] ?? "Unknown"
+        return "\(bookName) \(chapter):\(verse)"
+    }
+}
+
+/// Unified list entry — either a Note or a Bookmark, surfaced in a
+/// single scrollable list under the Notes tab. Both types are sorted
+/// by their mutation date (updatedAt for notes, addedAt for bookmarks).
+enum SavedEntry: Identifiable {
+    case note(Note)
+    case bookmark(Bookmark)
+
+    var id: String {
+        switch self {
+        case .note(let n):     return "note_\(n.id.uuidString)"
+        case .bookmark(let b): return "bookmark_\(b.id.uuidString)"
+        }
+    }
+
+    var sortDate: Date {
+        switch self {
+        case .note(let n):     return n.updatedAt
+        case .bookmark(let b): return b.addedAt
+        }
+    }
+}
+
 struct CompanionPanel: View {
 
-    @EnvironmentObject var myBible:       MyBibleService
-    @EnvironmentObject var notesManager:  NotesManager
-    @EnvironmentObject var bmapsService:  BMapsService
+    @EnvironmentObject var myBible:          MyBibleService
+    @EnvironmentObject var notesManager:     NotesManager
+    @EnvironmentObject var bmapsService:     BMapsService
+    @EnvironmentObject var bookmarksManager: BookmarksManager
 
     @AppStorage("companionMode")      private var modeRaw:           String = CompanionMode.commentary.rawValue
     @AppStorage("companionBiblePath") private var companionBiblePath: String = ""
@@ -63,6 +119,43 @@ struct CompanionPanel: View {
     @State private var verseNoteIDs:      [UUID]            = []
     @State private var noteSearchText:    String            = ""
     @State private var selectedVerseNote: Note?              = nil
+    /// Controller for the in-panel note editor. Provides keyboard-
+    /// shortcut bridge (Bold/Italic/Heading/Bullet) via the formatting
+    /// toolbar buttons. Same pattern NotesView uses in the Organizer.
+    @StateObject private var editorController = NoteEditorController()
+    /// Debounce timer for autosave — same 0.8s idle delay the Organizer
+    /// editor uses, so typing doesn't hammer the disk.
+    @State private var saveTimer:         Timer?            = nil
+    /// Active filter for the unified Notes tab list: all, notes only,
+    /// or bookmarks only. Three filter pills at the top of the Notes
+    /// tab let the user switch.
+    @State private var savedFilter:       SavedFilter       = .all
+    /// When set, the Notes tab list is filtered to notes attached to
+    /// this specific verse. Set by the "Make a Note" popover action and
+    /// the inline note icon — both post showNotesForVerse. Cleared via
+    /// a "Back to all notes" button at the top of the list.
+    @State private var verseFilter:       VerseKey?         = nil
+    /// Which view of the saved list is shown: Active, Archived, or
+    /// Trash. Toggled via the bottom-of-list toggles.
+    @State private var savedView:         SavedView         = .active
+    /// When true, the Notes tab list is in multi-select mode:
+    /// checkboxes beside each row, action bar at bottom with Delete
+    /// and (notes-only) Archive. Toggled by the Select/Done button.
+    @State private var isSelectMode:      Bool              = false
+    /// IDs of the currently-selected items in multi-select mode. String
+    /// keys match SavedEntry.id so both note and bookmark selections
+    /// coexist in one Set.
+    @State private var selectedIDs:       Set<String>       = []
+    /// Bulk-delete confirmation dialog state.
+    @State private var showBulkDeleteConfirm: Bool          = false
+    /// Single-bookmark delete confirmation dialog state (individual
+    /// bookmark delete is permanent per design).
+    @State private var pendingBookmarkDelete: Bookmark?     = nil
+    /// Single-note delete confirmation dialog state (individual note
+    /// delete goes to Trash per design, with warning).
+    @State private var pendingNoteDelete:     Note?         = nil
+    /// Empty Trash confirmation dialog state.
+    @State private var showEmptyTrashConfirm: Bool          = false
     @State private var crossRefGroups:    [MyBibleService.CrossRefGroup] = []
     @State private var crossRefIsLoading: Bool              = false
     @State private var crossRefTarget:    MyBibleService.CrossRefEntry? = nil
@@ -102,6 +195,7 @@ struct CompanionPanel: View {
             contentArea
         }
         .onAppear {
+            print("[STARTUP] CompanionPanel.onAppear book=\(bookNumber) ch=\(chapter)")
             load()
             #if os(macOS)
             pbCount = NSPasteboard.general.changeCount
@@ -183,10 +277,35 @@ struct CompanionPanel: View {
                 }
             }
         }
-        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("showVerseNotes"))) { notification in
-            guard let notes = notification.userInfo?["notes"] as? [Note],
-                  let first = notes.first else { return }
-            selectedVerseNote = first
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("showNotesForVerse"))) { notification in
+            // Triggered by:
+            //  - Tapping the inline blue note icon next to a verse
+            //  - Tapping "Make a Note" in the verse popover
+            // Switches to the Notes tab, sets the verse filter so the
+            // list shows only notes for this verse (plus "+ New note"),
+            // and clears any previous single-note drill-in.
+            guard let bn = notification.userInfo?["bookNumber"] as? Int,
+                  let ch = notification.userInfo?["chapter"]    as? Int,
+                  let vs = notification.userInfo?["verse"]      as? Int
+                  else { return }
+            verseFilter       = VerseKey(bookNumber: bn, chapter: ch, verse: vs)
+            savedFilter       = .notes
+            selectedVerseNote = nil
+            modeRaw           = CompanionMode.notes.rawValue
+        }
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("openNoteInCompanion"))) { notification in
+            print("[NOTE DEBUG] CompanionPanel received openNoteInCompanion")
+            // Triggered by the popover "Make a Note" action after
+            // creating a new note. Opens the note in the Notes-tab
+            // drill-in editor without leaving the Bible tab.
+            guard let note = notification.userInfo?["note"] as? Note else {
+                print("[NOTE DEBUG] CompanionPanel userInfo did NOT contain Note — dropping")
+                return
+            }
+            print("[NOTE DEBUG] CompanionPanel opening note id=\(note.id) in drill-in")
+            selectedVerseNote = note
+            savedView         = .active
+            verseFilter       = nil
             modeRaw           = CompanionMode.notes.rawValue
         }
         .onReceive(NotificationCenter.default.publisher(for: Notification.Name("strongsTapped"))) { note in
@@ -233,11 +352,8 @@ struct CompanionPanel: View {
             xrefBook = nil; xrefChapter = nil; xrefVerse = 0; crossRefTarget = nil
             syncedVerse = vs
             if syncedVerse > 0 { load() }
-            // Switch to Commentary so there's always something to read.
-            // Cross-refs load in background and are ready when user switches to Notes.
             if vs > 0 {
                 crossRefIsLoading = true
-                modeRaw = CompanionMode.commentary.rawValue
                 Task {
                     let groups = await myBible.lookupCrossReferences(book: bn, chapter: ch, verse: vs)
                     await MainActor.run {
@@ -503,15 +619,14 @@ struct CompanionPanel: View {
                     .buttonStyle(.plain)
                     Spacer()
                     Button {
-                        notesManager.delete(note)
-                        selectedVerseNote = nil
+                        pendingNoteDelete = note
                     } label: {
                         Image(systemName: "trash")
                             .font(.system(size: 12))
                             .foregroundStyle(Color.red.opacity(0.7))
                     }
                     .buttonStyle(.plain)
-                    .help("Delete note")
+                    .help("Move to Trash")
                 }
                 .padding(.horizontal, 12).padding(.vertical, 8)
                 .background(theme.background)
@@ -532,22 +647,92 @@ struct CompanionPanel: View {
 
                 Divider()
 
-                ScrollView {
-                    Text(note.content.isEmpty ? "Empty note" : note.content)
-                        .font(resolvedFont)
-                        .foregroundStyle(note.content.isEmpty ? theme.text.opacity(0.4) : theme.text)
-                        .lineSpacing(5)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(12)
+                // ── Formatting toolbar ───────────────────────────────
+                // Session 1: basic Markdown buttons wired to the same
+                // NoteEditorController the Organizer uses. Live
+                // Markdown rendering comes in Session 2.
+                HStack(spacing: 4) {
+                    FormatButton(label: "B", help: "Bold (**text**)") { editorController.bold() }
+                    FormatButton(label: "I", help: "Italic (*text*)")  { editorController.italic() }
+                    FormatButton(label: "H", help: "Heading (# line)") { editorController.heading() }
+                    FormatButton(label: "•", help: "Bullet (- line)")  { editorController.bullet() }
+                    Divider().frame(height: 16).padding(.horizontal, 4)
+                    Text("Markdown").font(.caption2).foregroundStyle(.tertiary)
+                    Spacer()
+                    // Small word-count indicator — useful for the
+                    // "serious notetaking" vibe without adding chrome.
+                    Text("\(note.wordCount) words")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
                 }
+                .padding(.horizontal, 12).padding(.vertical, 6)
+                .background(Color.platformWindowBg)
+
+                Divider()
+
+                // ── Real editor (AppKit NSTextView-backed) ───────────
+                // NoteTextEditor handles Unicode, bidi (Hebrew RTL),
+                // undo, scrolling. Session 2 will add live Markdown
+                // syntax highlighting on top of this same editor.
+                NoteTextEditor(
+                    noteID:      note.id,
+                    initialText: note.content,
+                    onTextChange: { val in
+                        guard !note.isLocked else { return }
+                        var u = note
+                        u.content = val
+                        scheduleSave(u)
+                    },
+                    fontSize:    fontSize,
+                    fontName:    fontName,
+                    controller:  editorController,
+                    isEditable:  !note.isLocked
+                )
+                .id(note.id)
                 .background(theme.background)
 
             } else {
-                // ── All notes list with search ──────────────────────
+                // ── Unified Notes + Bookmarks list ──────────────────
+                // Three filter pills at top (All / Notes / Bookmarks),
+                // search bar below, then a single scrollable list.
+                // Notes render with their title + preview; bookmarks
+                // render as a compact row with the ox-blood bookmark
+                // icon and the verse reference.
+                HStack(spacing: 6) {
+                    ForEach(SavedFilter.allCases, id: \.self) { f in
+                        let active = savedFilter == f
+                        Button { savedFilter = f } label: {
+                            Text(f.rawValue)
+                                .font(.system(size: 11, weight: active ? .semibold : .regular))
+                                .foregroundStyle(active ? .white : theme.text)
+                                .padding(.horizontal, 10).padding(.vertical, 4)
+                                .background(
+                                    Capsule()
+                                        .fill(active ? filigreeAccent : Color.secondary.opacity(0.12))
+                                )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    Spacer()
+                    // Select / Done toggle — enters multi-select mode,
+                    // showing checkboxes on each row and revealing the
+                    // bulk-action bar at the bottom.
+                    Button {
+                        isSelectMode.toggle()
+                        if !isSelectMode { selectedIDs.removeAll() }
+                    } label: {
+                        Text(isSelectMode ? "Done" : "Select")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(filigreeAccent)
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.horizontal, 10).padding(.top, 8).padding(.bottom, 4)
+
                 HStack(spacing: 6) {
                     Image(systemName: "magnifyingglass")
                         .font(.system(size: 11)).foregroundStyle(.secondary)
-                    TextField("Search notes...", text: $noteSearchText)
+                    TextField("Search \(savedFilter.rawValue.lowercased())...", text: $noteSearchText)
                         .textFieldStyle(.plain).font(.system(size: 12))
                     if !noteSearchText.isEmpty {
                         Button { noteSearchText = "" } label: {
@@ -560,13 +745,47 @@ struct CompanionPanel: View {
 
                 Divider()
 
-                let notes = filteredNotes
-                if notes.isEmpty {
+                // ── Verse-filter banner ──────────────────────────────
+                // When the user taps "Make a Note" in the verse popover
+                // or the inline blue note icon, the Notes tab narrows
+                // to just that verse's notes. Banner shows the verse
+                // reference and a "back to all" action. Creating a new
+                // note is ONLY done via the verse popover — this is a
+                // read-only filtered view.
+                if let vf = verseFilter {
+                    HStack(spacing: 8) {
+                        Button {
+                            verseFilter = nil
+                        } label: {
+                            HStack(spacing: 3) {
+                                Image(systemName: "chevron.left")
+                                    .font(.system(size: 10, weight: .semibold))
+                                Text("All")
+                                    .font(.system(size: 11, weight: .medium))
+                            }
+                            .foregroundStyle(filigreeAccent)
+                        }
+                        .buttonStyle(.plain)
+
+                        Text(vf.displayTitle)
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(theme.text)
+
+                        Spacer()
+                    }
+                    .padding(.horizontal, 10).padding(.vertical, 6)
+                    .background(filigreeAccent.opacity(0.06))
+
+                    Divider()
+                }
+
+                let entries = filteredEntries
+                if entries.isEmpty {
                     VStack {
                         Spacer()
-                        Image(systemName: "note.text")
+                        Image(systemName: savedFilter == .bookmarks ? "bookmark" : "note.text")
                             .font(.system(size: 28)).foregroundStyle(.quaternary)
-                        Text(noteSearchText.isEmpty ? "No notes yet" : "No results")
+                        Text(emptyStateText)
                             .font(.caption).foregroundStyle(.secondary)
                         Spacer()
                     }
@@ -574,68 +793,12 @@ struct CompanionPanel: View {
                 } else {
                     ScrollView {
                         LazyVStack(spacing: 0) {
-                            ForEach(notes) { note in
-                                HStack(alignment: .top, spacing: 8) {
-                                    Button {
-                                        selectedVerseNote = note
-                                    } label: {
-                                        VStack(alignment: .leading, spacing: 3) {
-                                            Text(noteHeading(note))
-                                                .font(.system(size: 12, weight: .semibold))
-                                                .foregroundStyle(theme.text).lineLimit(1)
-                                            HStack(spacing: 6) {
-                                                if !note.verseReference.isEmpty {
-                                                    Text(note.verseReference)
-                                                        .font(.system(size: 10))
-                                                        .foregroundStyle(filigreeAccent)
-                                                }
-                                                Text(note.updatedAt, style: .date)
-                                                    .font(.system(size: 10))
-                                                    .foregroundStyle(.secondary)
-                                            }
-                                            let preview = notePreview(note)
-                                            if !preview.isEmpty {
-                                                Text(preview)
-                                                    .font(.system(size: 11))
-                                                    .foregroundStyle(theme.text.opacity(0.65))
-                                                    .lineLimit(2)
-                                            }
-                                        }
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                    }
-                                    .buttonStyle(.plain)
-
-                                    VStack(spacing: 8) {
-                                        if note.bookNumber > 0 {
-                                            Button {
-                                                // Open in Organizer editor
-                                                NotificationCenter.default.post(
-                                                    name: Notification.Name("noteCreatedFromVerse"),
-                                                    object: nil,
-                                                    userInfo: ["note": note])
-                                            } label: {
-                                                Image(systemName: "square.and.pencil")
-                                                    .font(.system(size: 13))
-                                                    .foregroundStyle(filigreeAccent)
-                                            }
-                                            .buttonStyle(.plain)
-                                            .help("Open in Organizer editor")
-                                        }
-                                        Button { notesManager.delete(note) } label: {
-                                            Image(systemName: "trash")
-                                                .font(.system(size: 12))
-                                                .foregroundStyle(Color.red.opacity(0.6))
-                                        }.buttonStyle(.plain).help("Delete note")
-                                    }
-                                }
-                                .padding(.horizontal, 12).padding(.vertical, 8)
-                                .background(theme.background)
-                                .contextMenu {
-                                    Button(role: .destructive) {
-                                        notesManager.delete(note)
-                                    } label: {
-                                        Label("Delete Note", systemImage: "trash")
-                                    }
+                            ForEach(entries) { entry in
+                                switch entry {
+                                case .note(let note):
+                                    noteRow(note)
+                                case .bookmark(let bm):
+                                    bookmarkRow(bm)
                                 }
                                 Divider().padding(.leading, 12)
                             }
@@ -643,19 +806,563 @@ struct CompanionPanel: View {
                     }
                     .background(theme.background)
                 }
+
+                // ── Bottom bar ────────────────────────────────────────
+                // In select mode: Select All, count, Delete, Archive.
+                // In normal mode: view toggles (Active/Archived/Trash).
+                Divider()
+                if isSelectMode {
+                    bulkActionBar
+                } else {
+                    viewToggleBar
+                }
             }
         }
         .background(theme.background)
+        .confirmationDialog(
+            "Move \(selectedIDs.count) item\(selectedIDs.count == 1 ? "" : "s") to Trash?",
+            isPresented: $showBulkDeleteConfirm
+        ) {
+            Button("Move to Trash", role: .destructive) { performBulkDelete() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("You can restore items from Trash until you empty it.")
+        }
+        .confirmationDialog(
+            "Move note to Trash?",
+            isPresented: Binding(
+                get: { pendingNoteDelete != nil },
+                set: { if !$0 { pendingNoteDelete = nil } })
+        ) {
+            Button("Move to Trash", role: .destructive) {
+                if let n = pendingNoteDelete {
+                    notesManager.delete(n)
+                    // If the note was currently drilled-in, close back
+                    // to the list so the trashed note isn't still shown.
+                    if selectedVerseNote?.id == n.id {
+                        selectedVerseNote = nil
+                    }
+                }
+                pendingNoteDelete = nil
+            }
+            Button("Cancel", role: .cancel) { pendingNoteDelete = nil }
+        } message: {
+            Text("You can restore this note from Trash until you empty it.")
+        }
+        .confirmationDialog(
+            "Delete this bookmark?",
+            isPresented: Binding(
+                get: { pendingBookmarkDelete != nil },
+                set: { if !$0 { pendingBookmarkDelete = nil } })
+        ) {
+            Button("Delete Permanently", role: .destructive) {
+                if let b = pendingBookmarkDelete { bookmarksManager.delete(b) }
+                pendingBookmarkDelete = nil
+            }
+            Button("Cancel", role: .cancel) { pendingBookmarkDelete = nil }
+        } message: {
+            Text("This cannot be undone. Individual bookmark removal is permanent.")
+        }
+        .confirmationDialog(
+            "Empty Trash?",
+            isPresented: $showEmptyTrashConfirm
+        ) {
+            Button("Empty Trash", role: .destructive) {
+                notesManager.emptyTrash()
+                bookmarksManager.emptyTrash()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("All items in Trash will be permanently deleted. This cannot be undone.")
+        }
     }
 
-    private var filteredNotes: [Note] {
-        let all = notesManager.notes.sorted { $0.updatedAt > $1.updatedAt }
+    // MARK: - Bottom bars
+
+    /// Shown in multi-select mode. Select All toggle, count, and
+    /// action buttons. Archive is only offered when the selection is
+    /// notes-only (bookmarks aren't archivable).
+    private var bulkActionBar: some View {
+        let selectionIsNotesOnly = selectedIDs.allSatisfy { $0.hasPrefix("note_") }
+        let hasSelection = !selectedIDs.isEmpty
+        return HStack(spacing: 10) {
+            Button {
+                toggleSelectAll()
+            } label: {
+                Text(selectedIDs.count == filteredEntries.count && !filteredEntries.isEmpty
+                     ? "Deselect All" : "Select All")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(filigreeAccent)
+            }
+            .buttonStyle(.plain)
+
+            Text("\(selectedIDs.count) selected")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+
+            Spacer()
+
+            if selectionIsNotesOnly && hasSelection {
+                Button {
+                    performBulkArchive()
+                } label: {
+                    Label("Archive", systemImage: "archivebox")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(filigreeAccent)
+                }
+                .buttonStyle(.plain)
+            }
+
+            Button {
+                showBulkDeleteConfirm = true
+            } label: {
+                Label("Delete", systemImage: "trash")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(hasSelection ? .red : Color.red.opacity(0.3))
+            }
+            .buttonStyle(.plain)
+            .disabled(!hasSelection)
+        }
+        .padding(.horizontal, 12).padding(.vertical, 8)
+        .background(theme.background)
+    }
+
+    /// Shown when not in multi-select mode. Lets the user switch
+    /// between Active, Archived, and Trash views of the saved list.
+    /// Empty Trash button appears only in Trash view.
+    private var viewToggleBar: some View {
+        HStack(spacing: 8) {
+            ForEach(SavedView.allCases, id: \.self) { v in
+                let active = savedView == v
+                Button {
+                    savedView = v
+                    // Clear verse filter when navigating away from
+                    // Active — it's a concept that only makes sense
+                    // for active notes.
+                    if v != .active { verseFilter = nil }
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: icon(for: v))
+                            .font(.system(size: 10))
+                        Text(v.rawValue)
+                            .font(.system(size: 11, weight: active ? .semibold : .regular))
+                    }
+                    .foregroundStyle(active ? filigreeAccent : .secondary)
+                }
+                .buttonStyle(.plain)
+            }
+            Spacer()
+            if savedView == .trash, !filteredEntries.isEmpty {
+                Button { showEmptyTrashConfirm = true } label: {
+                    Text("Empty Trash")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.red)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 12).padding(.vertical, 8)
+        .background(theme.background)
+    }
+
+    private func icon(for view: SavedView) -> String {
+        switch view {
+        case .active:   return "tray"
+        case .archived: return "archivebox"
+        case .trash:    return "trash"
+        }
+    }
+
+    // MARK: - Bulk actions
+
+    private func toggleSelectAll() {
+        let allIDs = Set(filteredEntries.map { $0.id })
+        if selectedIDs == allIDs {
+            selectedIDs.removeAll()
+        } else {
+            selectedIDs = allIDs
+        }
+    }
+
+    private func performBulkDelete() {
+        for entry in filteredEntries where selectedIDs.contains(entry.id) {
+            switch entry {
+            case .note(let n):
+                // Notes: soft-delete (move to Trash).
+                notesManager.delete(n)
+            case .bookmark(let b):
+                // Bookmarks: BULK delete goes to Trash (per design),
+                // unlike individual delete which is permanent.
+                bookmarksManager.moveToTrash(b)
+            }
+        }
+        selectedIDs.removeAll()
+        isSelectMode = false
+    }
+
+    private func performBulkArchive() {
+        for entry in filteredEntries where selectedIDs.contains(entry.id) {
+            if case .note(let n) = entry {
+                notesManager.archive(n)
+            }
+        }
+        selectedIDs.removeAll()
+        isSelectMode = false
+    }
+
+    // MARK: - Saved list rows
+
+    @ViewBuilder
+    private func noteRow(_ note: Note) -> some View {
+        let entryID = "note_\(note.id.uuidString)"
+        HStack(alignment: .top, spacing: 8) {
+
+            // ── Select-mode checkbox ──────────────────────────────────
+            if isSelectMode {
+                Button {
+                    if selectedIDs.contains(entryID) {
+                        selectedIDs.remove(entryID)
+                    } else {
+                        selectedIDs.insert(entryID)
+                    }
+                } label: {
+                    Image(systemName: selectedIDs.contains(entryID)
+                          ? "checkmark.circle.fill"
+                          : "circle")
+                        .font(.system(size: 14))
+                        .foregroundStyle(selectedIDs.contains(entryID)
+                                         ? filigreeAccent : .secondary)
+                }
+                .buttonStyle(.plain)
+                .padding(.top, 2)
+            }
+
+            // Blue note icon — matches the inline-next-to-verse-number
+            // icon used in the Bible reader itself. Same hue everywhere
+            // notes are represented.
+            Image(systemName: "note.text")
+                .font(.system(size: 11))
+                .foregroundStyle(Color(red: 0.30, green: 0.50, blue: 0.75))
+                .padding(.top, 2)
+
+            Button {
+                // In select mode, tapping the row toggles selection
+                // (tap-to-select is friendlier than "you must hit the
+                // checkbox precisely").
+                if isSelectMode {
+                    if selectedIDs.contains(entryID) {
+                        selectedIDs.remove(entryID)
+                    } else {
+                        selectedIDs.insert(entryID)
+                    }
+                } else {
+                    selectedVerseNote = note
+                }
+            } label: {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(noteHeading(note))
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(theme.text).lineLimit(1)
+                    HStack(spacing: 6) {
+                        if !note.verseReference.isEmpty {
+                            Text(note.verseReference)
+                                .font(.system(size: 10))
+                                .foregroundStyle(filigreeAccent)
+                        }
+                        Text(note.updatedAt, style: .date)
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                    }
+                    let preview = notePreview(note)
+                    if !preview.isEmpty {
+                        Text(preview)
+                            .font(.system(size: 11))
+                            .foregroundStyle(theme.text.opacity(0.65))
+                            .lineLimit(2)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .buttonStyle(.plain)
+
+            // ── Trailing actions (differ by view) ─────────────────────
+            if !isSelectMode {
+                VStack(spacing: 8) {
+                    switch savedView {
+                    case .active:
+                        // Row tap opens the drill-in editor (in the
+                        // main row Button above). The old pencil
+                        // "Open in Organizer" affordance was removed
+                        // 2026-04-21: the CompanionPanel drill-in is
+                        // now the single edit surface, so jumping to
+                        // Organizer became a confusing alternate path.
+                        // If wider editing is ever wanted, add a
+                        // maximise affordance inside the drill-in.
+                        Button { pendingNoteDelete = note } label: {
+                            Image(systemName: "trash")
+                                .font(.system(size: 12))
+                                .foregroundStyle(Color.red.opacity(0.6))
+                        }.buttonStyle(.plain).help("Move to Trash")
+                    case .archived:
+                        Button { notesManager.unarchive(note) } label: {
+                            Image(systemName: "tray.and.arrow.up")
+                                .font(.system(size: 12))
+                                .foregroundStyle(filigreeAccent)
+                        }.buttonStyle(.plain).help("Unarchive")
+                    case .trash:
+                        Button { notesManager.restore(note) } label: {
+                            Image(systemName: "arrow.uturn.backward.circle")
+                                .font(.system(size: 12))
+                                .foregroundStyle(filigreeAccent)
+                        }.buttonStyle(.plain).help("Restore from Trash")
+                        Button { notesManager.deletePermanently(note) } label: {
+                            Image(systemName: "trash.slash")
+                                .font(.system(size: 12))
+                                .foregroundStyle(Color.red.opacity(0.8))
+                        }.buttonStyle(.plain).help("Delete permanently")
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, 12).padding(.vertical, 8)
+        .background(theme.background)
+        .contextMenu {
+            if savedView == .active {
+                Button(role: .destructive) {
+                    pendingNoteDelete = note
+                } label: {
+                    Label("Move to Trash", systemImage: "trash")
+                }
+                Button {
+                    notesManager.archive(note)
+                } label: {
+                    Label("Archive", systemImage: "archivebox")
+                }
+            } else if savedView == .archived {
+                Button {
+                    notesManager.unarchive(note)
+                } label: {
+                    Label("Unarchive", systemImage: "tray.and.arrow.up")
+                }
+            } else if savedView == .trash {
+                Button {
+                    notesManager.restore(note)
+                } label: {
+                    Label("Restore", systemImage: "arrow.uturn.backward")
+                }
+                Button(role: .destructive) {
+                    notesManager.deletePermanently(note)
+                } label: {
+                    Label("Delete Permanently", systemImage: "trash.slash")
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func bookmarkRow(_ bm: Bookmark) -> some View {
+        let entryID = "bookmark_\(bm.id.uuidString)"
+        HStack(alignment: .center, spacing: 8) {
+
+            // ── Select-mode checkbox ──────────────────────────────────
+            if isSelectMode {
+                Button {
+                    if selectedIDs.contains(entryID) {
+                        selectedIDs.remove(entryID)
+                    } else {
+                        selectedIDs.insert(entryID)
+                    }
+                } label: {
+                    Image(systemName: selectedIDs.contains(entryID)
+                          ? "checkmark.circle.fill"
+                          : "circle")
+                        .font(.system(size: 14))
+                        .foregroundStyle(selectedIDs.contains(entryID)
+                                         ? filigreeAccent : .secondary)
+                }
+                .buttonStyle(.plain)
+            }
+
+            // Ox-blood bookmark icon — matches the inline-next-to-
+            // verse-number icon used in the Bible reader itself.
+            Image(systemName: "bookmark.fill")
+                .font(.system(size: 11))
+                .foregroundStyle(SilkBookmarkRibbonView.silkRed)
+
+            Button {
+                if isSelectMode {
+                    if selectedIDs.contains(entryID) {
+                        selectedIDs.remove(entryID)
+                    } else {
+                        selectedIDs.insert(entryID)
+                    }
+                } else {
+                    // Navigate the Bible reader to this bookmark's passage.
+                    var info: [String: Any] = [
+                        "bookNumber": bm.bookNumber,
+                        "chapter":    bm.chapterNumber
+                    ]
+                    if let v = bm.verseNumber { info["verse"] = v }
+                    NotificationCenter.default.post(
+                        name: .navigateToPassage,
+                        object: nil,
+                        userInfo: info)
+                }
+            } label: {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(bm.displayTitle)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(theme.text).lineLimit(1)
+                    Text(bm.formattedDate)
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .buttonStyle(.plain)
+
+            // ── Trailing actions (differ by view) ─────────────────────
+            if !isSelectMode {
+                switch savedView {
+                case .active:
+                    // Individual bookmark delete is PERMANENT per
+                    // design — warning dialog via pendingBookmarkDelete.
+                    Button { pendingBookmarkDelete = bm } label: {
+                        Image(systemName: "trash")
+                            .font(.system(size: 12))
+                            .foregroundStyle(Color.red.opacity(0.6))
+                    }
+                    .buttonStyle(.plain)
+                    .help("Delete bookmark permanently")
+                case .archived:
+                    EmptyView()   // bookmarks aren't archivable
+                case .trash:
+                    // In Trash, bookmarks arrived via BULK delete.
+                    HStack(spacing: 8) {
+                        Button { bookmarksManager.restore(bm) } label: {
+                            Image(systemName: "arrow.uturn.backward.circle")
+                                .font(.system(size: 12))
+                                .foregroundStyle(filigreeAccent)
+                        }.buttonStyle(.plain).help("Restore from Trash")
+                        Button { bookmarksManager.deletePermanently(bm) } label: {
+                            Image(systemName: "trash.slash")
+                                .font(.system(size: 12))
+                                .foregroundStyle(Color.red.opacity(0.8))
+                        }.buttonStyle(.plain).help("Delete permanently")
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, 12).padding(.vertical, 8)
+        .background(theme.background)
+        .contextMenu {
+            if savedView == .active {
+                Button(role: .destructive) {
+                    pendingBookmarkDelete = bm
+                } label: {
+                    Label("Delete Bookmark", systemImage: "trash")
+                }
+            } else if savedView == .trash {
+                Button {
+                    bookmarksManager.restore(bm)
+                } label: {
+                    Label("Restore", systemImage: "arrow.uturn.backward")
+                }
+                Button(role: .destructive) {
+                    bookmarksManager.deletePermanently(bm)
+                } label: {
+                    Label("Delete Permanently", systemImage: "trash.slash")
+                }
+            }
+        }
+    }
+
+    // MARK: - Saved list data
+
+    /// Empty-state message, tuned to the active filter.
+    private var emptyStateText: String {
+        let q = noteSearchText.trimmingCharacters(in: .whitespaces)
+        if !q.isEmpty { return "No results" }
+        if let vf = verseFilter {
+            return "No notes on \(vf.displayTitle) yet"
+        }
+        switch savedFilter {
+        case .all:       return "Nothing saved yet"
+        case .notes:     return "No notes yet"
+        case .bookmarks: return "No bookmarks yet"
+        }
+    }
+
+    /// Unified filtered + sorted list of SavedEntry for the Notes tab.
+    /// Respects: savedView (active/archived/trash), savedFilter pill
+    /// (all/notes/bookmarks), verseFilter (optional), and the search
+    /// text. Archived + deleted notes are only visible in their
+    /// respective views.
+    private var filteredEntries: [SavedEntry] {
         let q = noteSearchText.trimmingCharacters(in: .whitespaces).lowercased()
-        guard !q.isEmpty else { return all }
-        return all.filter {
-            $0.title.lowercased().contains(q) ||
-            $0.content.lowercased().contains(q) ||
-            $0.verseReference.lowercased().contains(q)
+        var result: [SavedEntry] = []
+
+        if savedFilter == .all || savedFilter == .notes {
+            for n in notesManager.notes {
+                // savedView gating
+                switch savedView {
+                case .active:
+                    if n.isArchived || n.deletedAt != nil { continue }
+                case .archived:
+                    if !n.isArchived || n.deletedAt != nil { continue }
+                case .trash:
+                    if n.deletedAt == nil { continue }
+                }
+                // Verse-filter gating (only meaningful in Active view)
+                if savedView == .active, let vf = verseFilter {
+                    guard n.bookNumber    == vf.bookNumber,
+                          n.chapterNumber == vf.chapter,
+                          n.verseNumbers.isEmpty || n.verseNumbers.contains(vf.verse)
+                          else { continue }
+                }
+                if q.isEmpty
+                   || n.title.lowercased().contains(q)
+                   || n.content.lowercased().contains(q)
+                   || n.verseReference.lowercased().contains(q) {
+                    result.append(.note(n))
+                }
+            }
+        }
+
+        if savedFilter == .all || savedFilter == .bookmarks {
+            for b in bookmarksManager.bookmarks {
+                // savedView gating (bookmarks have no archive state)
+                switch savedView {
+                case .active:
+                    if b.deletedAt != nil { continue }
+                case .archived:
+                    continue   // bookmarks aren't archivable
+                case .trash:
+                    if b.deletedAt == nil { continue }
+                }
+                if savedView == .active, let vf = verseFilter {
+                    guard b.bookNumber    == vf.bookNumber,
+                          b.chapterNumber == vf.chapter,
+                          b.verseNumber == nil || b.verseNumber == vf.verse
+                          else { continue }
+                }
+                if q.isEmpty
+                   || b.displayTitle.lowercased().contains(q) {
+                    result.append(.bookmark(b))
+                }
+            }
+        }
+
+        return result.sorted { $0.sortDate > $1.sortDate }
+    }
+
+    /// Debounced autosave — fires 0.8s after the last keystroke. Matches
+    /// the Organizer editor's behaviour so typing rhythm feels the same
+    /// whether the user edits here or there.
+    private func scheduleSave(_ note: Note) {
+        saveTimer?.invalidate()
+        saveTimer = Timer.scheduledTimer(withTimeInterval: 0.8, repeats: false) { _ in
+            Task { @MainActor in self.notesManager.save(note) }
         }
     }
 

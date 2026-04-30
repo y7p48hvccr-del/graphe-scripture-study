@@ -10,6 +10,104 @@ import SQLite3
 
 // MARK: - Data Models
 
+struct AtlasSchema {
+    struct DictionarySource {
+        let table: String
+        let topicColumn: String
+        let definitionColumn: String
+    }
+
+    struct FragmentsSource {
+        let table: String
+        let idColumn: String
+        let fragmentColumn: String
+    }
+
+    static func dictionarySource(in db: OpaquePointer?) -> DictionarySource? {
+        guard let table = existingTable(in: db, candidates: [
+            "dictionary", "entries", "atlas_entries", "articles"
+        ]),
+        let topicColumn = existingColumn(in: db, table: table, candidates: [
+            "topic", "id", "entry_id", "key", "title", "name"
+        ]),
+        let definitionColumn = existingColumn(in: db, table: table, candidates: [
+            "definition", "html", "content", "body", "article_html"
+        ]) else {
+            return nil
+        }
+
+        return DictionarySource(table: table, topicColumn: topicColumn, definitionColumn: definitionColumn)
+    }
+
+    static func fragmentsSource(in db: OpaquePointer?) -> FragmentsSource? {
+        guard let table = existingTable(in: db, candidates: [
+            "content_fragments", "fragments", "assets"
+        ]),
+        let idColumn = existingColumn(in: db, table: table, candidates: [
+            "id", "name", "key"
+        ]),
+        let fragmentColumn = existingColumn(in: db, table: table, candidates: [
+            "fragment", "data", "content", "html"
+        ]) else {
+            return nil
+        }
+
+        return FragmentsSource(table: table, idColumn: idColumn, fragmentColumn: fragmentColumn)
+    }
+
+    static func infoTableExists(in db: OpaquePointer?) -> Bool {
+        existingTable(in: db, candidates: ["info"]) != nil
+    }
+
+    private static func existingTable(in db: OpaquePointer?, candidates: [String]) -> String? {
+        let lowerCandidates = Set(candidates.map { $0.lowercased() })
+        guard let stmt = prepare(db, "SELECT name FROM sqlite_master WHERE type='table'") else {
+            return nil
+        }
+        defer { sqlite3_finalize(stmt) }
+
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            guard let cName = sqlite3_column_text(stmt, 0) else { continue }
+            let name = String(cString: cName)
+            if lowerCandidates.contains(name.lowercased()) {
+                return name
+            }
+        }
+        return nil
+    }
+
+    private static func existingColumn(in db: OpaquePointer?, table: String, candidates: [String]) -> String? {
+        let lowerCandidates = candidates.map { $0.lowercased() }
+        guard let stmt = prepare(db, "PRAGMA table_info(\(quotedIdentifier(table)))") else {
+            return nil
+        }
+        defer { sqlite3_finalize(stmt) }
+
+        var columns: [String] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            guard let cName = sqlite3_column_text(stmt, 1) else { continue }
+            columns.append(String(cString: cName))
+        }
+
+        for candidate in lowerCandidates {
+            if let match = columns.first(where: { $0.lowercased() == candidate }) {
+                return match
+            }
+        }
+        return nil
+    }
+
+    static func prepare(_ db: OpaquePointer?, _ sql: String) -> OpaquePointer? {
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
+        return stmt
+    }
+
+    static func quotedIdentifier(_ identifier: String) -> String {
+        "\"\(identifier.replacingOccurrences(of: "\"", with: "\"\""))\""
+    }
+}
+
 struct BibleMap: Identifiable, Hashable {
     let id: String          // e.g. "#02. Israel's Exodus..."
     let number: String      // e.g. "02"
@@ -62,28 +160,40 @@ class BMapsParser {
         }
         defer { sqlite3_close(db) }
 
-        // 1. Load image filenames from content_fragments
         var imageNames: Set<String> = []
-        let imgSQL = "SELECT id FROM content_fragments"
-        var imgStmt: OpaquePointer?
-        if sqlite3_prepare_v2(db, imgSQL, -1, &imgStmt, nil) == SQLITE_OK {
-            while sqlite3_step(imgStmt) == SQLITE_ROW {
-                if let cStr = sqlite3_column_text(imgStmt, 0) {
-                    imageNames.insert(String(cString: cStr))
+        let fragmentsSource = AtlasSchema.fragmentsSource(in: db)
+        if let fragmentsSource {
+            let imgSQL = """
+            SELECT \(AtlasSchema.quotedIdentifier(fragmentsSource.idColumn))
+            FROM \(AtlasSchema.quotedIdentifier(fragmentsSource.table))
+            """
+            var imgStmt: OpaquePointer?
+            if sqlite3_prepare_v2(db, imgSQL, -1, &imgStmt, nil) == SQLITE_OK {
+                while sqlite3_step(imgStmt) == SQLITE_ROW {
+                    if let cStr = sqlite3_column_text(imgStmt, 0) {
+                        imageNames.insert(String(cString: cStr))
+                    }
                 }
             }
+            sqlite3_finalize(imgStmt)
         }
-        sqlite3_finalize(imgStmt)
 
-        // 2. Load all dictionary entries
-        // Detect whether this is an encrypted .graphe module
         let isGraphe = dbPath.hasSuffix(".graphe")
+        guard let dictionarySource = AtlasSchema.dictionarySource(in: db) else {
+            print("[BMapsParser] Could not find a compatible atlas dictionary table in \(dbPath)")
+            return ([], [])
+        }
 
         var maps: [BibleMap] = []
         var places: [BiblePlaceEntry] = []
         var mapTitleLookup: [String: String] = [:]  // id -> title
 
-        let dictSQL = "SELECT topic, definition FROM dictionary ORDER BY topic"
+        let dictSQL = """
+        SELECT \(AtlasSchema.quotedIdentifier(dictionarySource.topicColumn)),
+               \(AtlasSchema.quotedIdentifier(dictionarySource.definitionColumn))
+        FROM \(AtlasSchema.quotedIdentifier(dictionarySource.table))
+        ORDER BY \(AtlasSchema.quotedIdentifier(dictionarySource.topicColumn))
+        """
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, dictSQL, -1, &stmt, nil) == SQLITE_OK else {
             return ([], [])
@@ -112,17 +222,20 @@ class BMapsParser {
         sqlite3_finalize(stmt)
 
         // First pass: build map title lookup
-        for entry in rawEntries where entry.topic.hasPrefix("#") {
+        for entry in rawEntries where looksLikeMapEntry(topic: entry.topic, definition: entry.definition) {
             let title = entry.topic
                 .replacingOccurrences(of: #"^#\d+\.\s*"#, with: "", options: .regularExpression)
             mapTitleLookup[entry.topic] = title
         }
 
         // Second pass: parse map articles
-        for entry in rawEntries where entry.topic.hasPrefix("#") && !entry.topic.contains("Index") {
+        var syntheticIndex = 1
+        for entry in rawEntries
+        where looksLikeMapEntry(topic: entry.topic, definition: entry.definition) && !entry.topic.contains("Index") {
             let mapID = entry.topic
-            let title = mapTitleLookup[mapID] ?? mapID
-            let number = String(mapID.dropFirst(1).prefix(2))
+            let title = normalizedMapTitle(for: mapID, fallbackHTML: entry.definition)
+            let number = normalizedMapNumber(for: mapID, fallbackIndex: syntheticIndex)
+            syntheticIndex += 1
 
             // Extract first image referenced via <!-- INCLUDE(filename) -->
             let imageName = firstInclude(in: entry.definition)
@@ -153,6 +266,50 @@ class BMapsParser {
 
     // MARK: - Private helpers
 
+    private static func looksLikeMapEntry(topic: String, definition: String) -> Bool {
+        if topic.hasPrefix("#") { return true }
+
+        let lowerTopic = topic.lowercased()
+        if lowerTopic.hasPrefix("map ") || lowerTopic.hasPrefix("atlas ") {
+            return true
+        }
+
+        return definition.contains("<!-- INCLUDE(") && definition.localizedCaseInsensitiveContains("<li")
+    }
+
+    private static func normalizedMapTitle(for topic: String, fallbackHTML: String) -> String {
+        let stripped = topic
+            .replacingOccurrences(of: #"^#?\d+[\.\-: ]*\s*"#, with: "", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if !stripped.isEmpty { return stripped }
+
+        if let heading = firstHeading(in: fallbackHTML) {
+            return heading
+        }
+        return topic
+    }
+
+    private static func normalizedMapNumber(for topic: String, fallbackIndex: Int) -> String {
+        if let range = topic.range(of: #"\d+"#, options: .regularExpression) {
+            let number = String(topic[range])
+            return number.count >= 2 ? String(number.prefix(2)) : String(format: "%02d", Int(number) ?? fallbackIndex)
+        }
+        return String(format: "%02d", fallbackIndex)
+    }
+
+    private static func firstHeading(in html: String) -> String? {
+        let pattern = #"<h[1-3][^>]*>(.*?)</h[1-3]>"#
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { return nil }
+        let nsHTML = html as NSString
+        guard let match = regex.firstMatch(in: html, range: NSRange(location: 0, length: nsHTML.length)),
+              match.numberOfRanges > 1 else { return nil }
+
+        let raw = nsHTML.substring(with: match.range(at: 1))
+        let plain = raw.replacingOccurrences(of: #"<[^>]+>"#, with: "", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return plain.isEmpty ? nil : plain
+    }
+
     private static func firstInclude(in html: String) -> String? {
         let pattern = #"<!--\s*INCLUDE\(([^)]+)\)\s*-->"#
         guard let range = html.range(of: pattern, options: .regularExpression) else { return nil }
@@ -165,15 +322,9 @@ class BMapsParser {
 
     private static func parseMapPlaces(from html: String) -> [MapPlace] {
         var result: [MapPlace] = []
-        // Split on list items
         let segments = html.components(separatedBy: "<li")
         for seg in segments {
-            guard let nameRange = seg.range(of: "<strong>") else { continue }
-            let afterOpen = seg[nameRange.upperBound...]
-            guard let closeRange = afterOpen.range(of: "</strong>") else { continue }
-            let placeName = String(afterOpen[..<closeRange.lowerBound])
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !placeName.isEmpty else { continue }
+            guard let placeName = extractPlaceName(from: seg), !placeName.isEmpty else { continue }
 
             let verseRefs = extractVerseRefs(from: seg)
             if !verseRefs.isEmpty {
@@ -183,10 +334,32 @@ class BMapsParser {
         return result
     }
 
+    private static func extractPlaceName(from segment: String) -> String? {
+        if let name = firstTagContents(in: segment, tag: "strong") {
+            return name
+        }
+        if let name = firstTagContents(in: segment, tag: "b") {
+            return name
+        }
+        return nil
+    }
+
+    private static func firstTagContents(in html: String, tag: String) -> String? {
+        let pattern = "<\(tag)[^>]*>(.*?)</\(tag)>"
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { return nil }
+        let nsHTML = html as NSString
+        guard let match = regex.firstMatch(in: html, range: NSRange(location: 0, length: nsHTML.length)),
+              match.numberOfRanges > 1 else { return nil }
+
+        let raw = nsHTML.substring(with: match.range(at: 1))
+        let plain = raw.replacingOccurrences(of: #"<[^>]+>"#, with: "", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return plain.isEmpty ? nil : plain
+    }
+
     private static func extractVerseRefs(from segment: String) -> [String] {
         var refs: [String] = []
-        // Pattern: href="B:BOOKNUM CHAPTER:VERSE"
-        let pattern = #"href="B:(\d+)\s+([^"]+)""#
+        let pattern = #"href=["']B:(\d+)\s+([^"']+)["']"#
         let regex = try? NSRegularExpression(pattern: pattern)
         let nsStr = segment as NSString
         let matches = regex?.matches(in: segment, range: NSRange(location: 0, length: nsStr.length)) ?? []
@@ -204,14 +377,16 @@ class BMapsParser {
     private static func parsePlaceMapRefs(from html: String,
                                            titleLookup: [String: String]) -> [PlaceMapRef] {
         var result: [PlaceMapRef] = []
-        // Pattern: href="S:#XX. Map Title">GRIDREF<
-        let pattern = #"href="S:(#[^"]+)">([^<]+)<"#
+        let pattern = #"href=["']S:([^"']+)["'][^>]*>([^<]+)<"#
         let regex = try? NSRegularExpression(pattern: pattern)
         let nsStr = html as NSString
         let matches = regex?.matches(in: html, range: NSRange(location: 0, length: nsStr.length)) ?? []
         for match in matches {
             let mapID   = nsStr.substring(with: match.range(at: 1))
             let gridRef = nsStr.substring(with: match.range(at: 2)).trimmingCharacters(in: .whitespaces)
+            guard titleLookup[mapID] != nil || mapID.hasPrefix("#") || mapID.lowercased().hasPrefix("map ") else {
+                continue
+            }
             let title   = titleLookup[mapID] ?? mapID
             result.append(PlaceMapRef(mapID: mapID, mapTitle: title, gridRef: gridRef))
         }
