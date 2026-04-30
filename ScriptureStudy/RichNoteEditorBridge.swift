@@ -3,11 +3,21 @@ import Foundation
 #if os(macOS)
 import AppKit
 
+extension NSAttributedString.Key {
+    static let richNoteBlockKind = NSAttributedString.Key("RichNoteBlockKind")
+}
+
 enum RichNoteEditorBridge {
+    private static let noteHighlightColor = NSColor.systemYellow.withAlphaComponent(0.35)
+
     static func attributedString(
         from document: RichNoteDocument,
         baseFont: NSFont
     ) -> NSAttributedString {
+#if DEBUG
+        let violations = RichNoteDocumentInvariant.validate(document)
+        assert(violations.isEmpty, "Attempted to render invalid RichNoteDocument: \(violations)")
+#endif
         let result = NSMutableAttributedString()
 
         for (index, block) in document.blocks.enumerated() {
@@ -24,21 +34,29 @@ enum RichNoteEditorBridge {
             if !prefix.isEmpty {
                 let prefixAttributes: [NSAttributedString.Key: Any] = [
                     .font: blockFont,
-                    .paragraphStyle: paragraph
+                    .paragraphStyle: paragraph,
+                    .richNoteBlockKind: block.kind.token
                 ]
                 result.append(NSAttributedString(string: prefix, attributes: prefixAttributes))
             }
 
             for inline in block.inlines {
-                let attributes: [NSAttributedString.Key: Any] = [
+                var attributes: [NSAttributedString.Key: Any] = [
                     .font: font(for: inline.styles, baseFont: blockFont),
-                    .paragraphStyle: paragraph
+                    .paragraphStyle: paragraph,
+                    .richNoteBlockKind: block.kind.token
                 ]
+                if inline.styles.contains(.underline) {
+                    attributes[.underlineStyle] = NSUnderlineStyle.single.rawValue
+                }
+                if inline.styles.contains(.highlight) {
+                    attributes[.backgroundColor] = noteHighlightColor
+                }
                 result.append(NSAttributedString(string: inline.text, attributes: attributes))
             }
         }
 
-        applyLinks(document.links, to: result)
+        applyLinks(document, to: result)
         return result
     }
 
@@ -54,15 +72,15 @@ enum RichNoteEditorBridge {
         var links: [RichNoteLink] = []
 
         for range in paragraphRanges {
-            var paragraphText = nsString.substring(with: range)
-            if paragraphText.hasSuffix("\n") {
-                paragraphText.removeLast()
-            }
+            let rawParagraphText = nsString.substring(with: range)
+            let paragraphText = rawParagraphText.hasSuffix("\n")
+                ? String(rawParagraphText.dropLast())
+                : rawParagraphText
 
             let blockID = UUID()
-            let kind = inferBlockKind(from: paragraphText)
+            let kind = blockKind(in: attributedString, paragraphRange: range, paragraphText: paragraphText)
             let contentText = stripRenderedPrefix(from: paragraphText, for: kind)
-            let contentRange = adjustedContentRange(for: range, originalText: paragraphText, kind: kind)
+            let contentRange = adjustedContentRange(for: range, originalText: rawParagraphText, kind: kind)
             let inlines = inlines(
                 from: attributedString,
                 contentText: contentText,
@@ -76,12 +94,14 @@ enum RichNoteEditorBridge {
         }
 
         let document = RichNoteDocument(
-            plainText: RichNoteBridge.plainText(
-                from: RichNoteDocument(plainText: string, blocks: blocks, links: links)
-            ),
+            plainText: RichNoteBridge.canonicalPlainText(from: blocks),
             blocks: blocks,
             links: links
         )
+#if DEBUG
+        let violations = RichNoteDocumentInvariant.validate(document)
+        assert(violations.isEmpty, "RichNoteEditorBridge produced invalid document: \(violations)")
+#endif
         return document
     }
 
@@ -97,8 +117,12 @@ enum RichNoteEditorBridge {
         var result: [RichNoteInline] = []
         attributedString.enumerateAttributes(in: contentRange, options: []) { attributes, range, _ in
             let text = (attributedString.string as NSString).substring(with: range)
-            let font = (attributes[.font] as? NSFont) ?? font(for: blockKind, baseFont: baseFont)
-            let styles = inlineStyles(for: font, against: font(for: blockKind, baseFont: baseFont))
+            let resolvedFont = (attributes[.font] as? NSFont) ?? font(for: blockKind, baseFont: baseFont)
+            let styles = inlineStyles(
+                from: attributes,
+                font: resolvedFont,
+                against: font(for: blockKind, baseFont: baseFont)
+            )
             result.append(RichNoteInline(text: text, styles: styles))
         }
 
@@ -116,10 +140,8 @@ enum RichNoteEditorBridge {
         attributedString.enumerateAttribute(.link, in: contentRange, options: []) { value, range, _ in
             guard let value else { return }
             let localRange = RichTextRange(location: range.location - contentRange.location, length: range.length)
-            if let url = value as? URL {
-                result.append(RichNoteLink(blockID: blockID, utf16Range: localRange, target: .url(url)))
-            } else if let string = value as? String, let url = URL(string: string) {
-                result.append(RichNoteLink(blockID: blockID, utf16Range: localRange, target: .url(url)))
+            if let target = linkTarget(from: value) {
+                result.append(RichNoteLink(blockID: blockID, utf16Range: localRange, target: target))
             }
         }
         return result
@@ -146,7 +168,23 @@ enum RichNoteEditorBridge {
         if let bullet = parseBullet(from: trimmed) {
             return bullet
         }
+        if let numbered = parseNumberedItem(from: trimmed) {
+            return numbered
+        }
         return .paragraph
+    }
+
+    private static func blockKind(
+        in attributedString: NSAttributedString,
+        paragraphRange: NSRange,
+        paragraphText: String
+    ) -> RichNoteBlockKind {
+        if paragraphRange.length > 0,
+           let token = attributedString.attribute(.richNoteBlockKind, at: paragraphRange.location, effectiveRange: nil) as? String,
+           let kind = RichNoteBlockKind(token: token) {
+            return kind
+        }
+        return inferBlockKind(from: paragraphText)
     }
 
     private static func parseHeading(from text: String) -> RichNoteBlockKind? {
@@ -160,9 +198,19 @@ enum RichNoteEditorBridge {
 
     private static func parseBullet(from text: String) -> RichNoteBlockKind? {
         let trimmed = text.drop { $0 == " " || $0 == "\t" }
-        guard trimmed.hasPrefix("- ") else { return nil }
+        guard trimmed.hasPrefix("- ") || trimmed.hasPrefix("• ") else { return nil }
         let depth = max(0, (text.count - trimmed.count) / 2)
         return .bulletItem(depth: depth)
+    }
+
+    private static func parseNumberedItem(from text: String) -> RichNoteBlockKind? {
+        let trimmed = text.drop { $0 == " " || $0 == "\t" }
+        let digits = trimmed.prefix { $0.isNumber }
+        guard !digits.isEmpty else { return nil }
+        let remainder = trimmed.dropFirst(digits.count)
+        guard remainder.hasPrefix(". ") else { return nil }
+        let depth = max(0, (text.count - trimmed.count) / 2)
+        return .numberedItem(depth: depth, ordinal: Int(digits))
     }
 
     private static func stripRenderedPrefix(from text: String, for kind: RichNoteBlockKind) -> String {
@@ -170,12 +218,26 @@ enum RichNoteEditorBridge {
         case .paragraph:
             return text
         case .heading(let level):
-            return String(text.dropFirst(min(text.count, level + 1)))
+            if text.hasPrefix(String(repeating: "#", count: level) + " ") {
+                return String(text.dropFirst(min(text.count, level + 1)))
+            }
+            return text
         case .bulletItem:
             let trimmed = text.drop { $0 == " " || $0 == "\t" }
-            return String(trimmed.dropFirst(min(trimmed.count, 2)))
-        case .numberedItem:
+            if trimmed.hasPrefix("• ") || trimmed.hasPrefix("- ") {
+                return String(trimmed.dropFirst(min(trimmed.count, 2)))
+            }
             return text
+        case .numberedItem:
+            let trimmed = text.drop { $0 == " " || $0 == "\t" }
+            let digits = trimmed.prefix { $0.isNumber }
+            guard !digits.isEmpty else { return text }
+            let remainder = trimmed.dropFirst(digits.count)
+            if remainder.hasPrefix(". ") {
+                return String(remainder.dropFirst(2))
+            }
+            guard remainder.hasPrefix(" ") else { return text }
+            return String(remainder.dropFirst())
         }
     }
 
@@ -192,12 +254,29 @@ enum RichNoteEditorBridge {
         case .paragraph:
             prefixLength = 0
         case .heading(let level):
-            prefixLength = min(effectiveLength, level + 1)
+            let markdownPrefix = String(repeating: "#", count: level) + " "
+            prefixLength = originalText.hasPrefix(markdownPrefix) ? min(effectiveLength, level + 1) : 0
         case .bulletItem:
             let leadingSpaces = originalText.prefix { $0 == " " || $0 == "\t" }.count
-            prefixLength = min(effectiveLength, leadingSpaces + 2)
+            let trimmed = originalText.dropFirst(leadingSpaces)
+            let markerLength = (trimmed.hasPrefix("• ") || trimmed.hasPrefix("- ")) ? 2 : 0
+            prefixLength = min(effectiveLength, leadingSpaces + markerLength)
         case .numberedItem:
-            prefixLength = 0
+            let leadingSpaces = originalText.prefix { $0 == " " || $0 == "\t" }.count
+            let trimmed = originalText.dropFirst(leadingSpaces)
+            let digits = trimmed.prefix { $0.isNumber }
+            if digits.isEmpty {
+                prefixLength = 0
+            } else {
+                let remainder = trimmed.dropFirst(digits.count)
+                if remainder.hasPrefix(". ") {
+                    prefixLength = min(effectiveLength, leadingSpaces + digits.count + 2)
+                } else {
+                    prefixLength = remainder.hasPrefix(" ")
+                        ? min(effectiveLength, leadingSpaces + digits.count + 1)
+                        : 0
+                }
+            }
         }
 
         return NSRange(
@@ -210,10 +289,10 @@ enum RichNoteEditorBridge {
         switch kind {
         case .paragraph:
             return ""
-        case .heading(let level):
-            return String(repeating: "#", count: level) + " "
+        case .heading:
+            return ""
         case .bulletItem(let depth):
-            return String(repeating: "  ", count: max(0, depth)) + "- "
+            return String(repeating: "  ", count: max(0, depth)) + "• "
         case .numberedItem(_, let ordinal):
             if let ordinal {
                 return "\(ordinal). "
@@ -263,9 +342,7 @@ enum RichNoteEditorBridge {
             traits.insert(.italic)
         }
 
-        guard let descriptor = baseFont.fontDescriptor.withSymbolicTraits(traits) else {
-            return baseFont
-        }
+        let descriptor = baseFont.fontDescriptor.withSymbolicTraits(traits)
         return NSFont(descriptor: descriptor, size: baseFont.pointSize) ?? baseFont
     }
 
@@ -283,72 +360,73 @@ enum RichNoteEditorBridge {
         return styles
     }
 
-    private static func applyLinks(_ links: [RichNoteLink], to attributedString: NSMutableAttributedString) {
-        for link in links {
-            guard let target = targetValue(for: link.target) else { continue }
-            let blockRange = blockContentRange(for: link.blockID, in: attributedString.string)
-            guard blockRange.location != NSNotFound else { continue }
-            let resolvedRange = NSRange(
-                location: blockRange.location + link.utf16Range.location,
-                length: link.utf16Range.length
-            )
-            guard NSMaxRange(resolvedRange) <= attributedString.length else { continue }
-            attributedString.addAttribute(.link, value: target, range: resolvedRange)
+    private static func inlineStyles(
+        from attributes: [NSAttributedString.Key: Any],
+        font: NSFont,
+        against baseFont: NSFont
+    ) -> Set<RichNoteInlineStyle> {
+        var styles = inlineStyles(for: font, against: baseFont)
+
+        if let underlineStyle = attributes[.underlineStyle] as? Int,
+           underlineStyle != 0 {
+            styles.insert(.underline)
+        }
+        if attributes[.backgroundColor] != nil {
+            styles.insert(.highlight)
+        }
+
+        return styles
+    }
+
+    private static func applyLinks(_ document: RichNoteDocument, to attributedString: NSMutableAttributedString) {
+        let blockRanges = blockContentRanges(in: attributedString.string, blocks: document.blocks)
+
+        for link in document.links {
+            guard let target = RichNoteLinkCodec.url(for: link.target),
+                  let blockRange = blockRanges[link.blockID] else { continue }
+
+            guard link.utf16Range.location >= 0, link.utf16Range.length >= 0 else { continue }
+            let resolvedRange = NSRange(location: blockRange.location + link.utf16Range.location, length: link.utf16Range.length)
+            guard NSMaxRange(resolvedRange) <= NSMaxRange(blockRange) else { continue }
+            attributedString.addAttributes([
+                .link: target,
+                .underlineStyle: NSUnderlineStyle.single.rawValue,
+                .foregroundColor: NSColor.linkColor
+            ], range: resolvedRange)
         }
     }
 
-    private static func targetValue(for target: RichNoteLinkTarget) -> Any? {
-        switch target {
-        case .url(let url):
-            return url
-        case .scripture(let scripture):
-            var components = URLComponents()
-            components.scheme = "grapheone-scripture"
-            components.host = "passage"
-            components.queryItems = [
-                URLQueryItem(name: "book", value: String(scripture.bookNumber)),
-                URLQueryItem(name: "chapter", value: String(scripture.chapterNumber)),
-                URLQueryItem(name: "verses", value: scripture.verseNumbers.map(String.init).joined(separator: ","))
-            ]
-            return components.url
-        case .strongs(let strongs):
-            var components = URLComponents()
-            components.scheme = "grapheone-strongs"
-            components.host = "entry"
-            components.queryItems = [
-                URLQueryItem(name: "number", value: strongs.number),
-                URLQueryItem(name: "ot", value: strongs.isOldTestament.map { $0 ? "1" : "0" })
-            ]
-            return components.url
-        case .note(let id):
-            var components = URLComponents()
-            components.scheme = "grapheone-note"
-            components.host = "entry"
-            components.queryItems = [URLQueryItem(name: "id", value: id.uuidString)]
-            return components.url
-        }
+    private static func linkTarget(from value: Any) -> RichNoteLinkTarget? {
+        RichNoteLinkCodec.target(from: value)
     }
 
-    private static func blockContentRange(for blockID: UUID, in fullText: String) -> NSRange {
-        let document = RichNoteBridge.document(fromPlainText: fullText)
-        let blocks = document.blocks
+    private static func blockContentRanges(in fullText: String, blocks: [RichNoteBlock]) -> [UUID: NSRange] {
+        let nsText = fullText as NSString
+        guard !blocks.isEmpty else { return [:] }
+
+        if nsText.length == 0 {
+            if let block = blocks.first {
+                return [block.id: NSRange(location: 0, length: 0)]
+            }
+            return [:]
+        }
+
+        var ranges: [UUID: NSRange] = [:]
         var location = 0
 
-        for (index, block) in blocks.enumerated() {
-            let text = block.inlines.map(\.text).joined()
-            let prefix = renderedPrefix(for: block.kind)
-            let length = (prefix + text).utf16.count
-            let contentLocation = location + prefix.utf16.count
-            if block.id == blockID {
-                return NSRange(location: contentLocation, length: text.utf16.count)
+        for block in blocks {
+            guard location < nsText.length else { break }
+            let paragraphRange = nsText.paragraphRange(for: NSRange(location: location, length: 0))
+            var paragraphText = nsText.substring(with: paragraphRange)
+            if paragraphText.hasSuffix("\n") {
+                paragraphText.removeLast()
             }
-            location += length
-            if index < blocks.count - 1 {
-                location += 1
-            }
+            ranges[block.id] = adjustedContentRange(for: paragraphRange, originalText: paragraphText, kind: block.kind)
+            location = NSMaxRange(paragraphRange)
         }
 
-        return NSRange(location: NSNotFound, length: 0)
+        return ranges
     }
+
 }
 #endif

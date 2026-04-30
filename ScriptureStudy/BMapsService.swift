@@ -21,14 +21,23 @@ class BMapsService: ObservableObject {
     @Published var places: [BiblePlaceEntry] = []
     @Published var isLoaded: Bool            = false
 
+    // 2026-04-21: concurrent-load guard. `isLoaded` only flips inside the
+    // detached Task's completion block, so without this flag every caller
+    // arriving before the first parse finishes races past the guard and
+    // kicks off its own parse. Symptom was 14 parallel parses on cold start.
+    // @MainActor isolation makes a plain Bool safe here.
+    private var isLoading: Bool = false
+
     private(set) var placeVerseIndex: [String: [String]] = [:]
     private(set) var placeMapsIndex:  [String: [String]] = [:]
+    private(set) var loadedAtlasURL: URL?
 
     // MARK: - Load
 
     func loadIfNeeded() {
-        print("[STARTUP] BMapsService.loadIfNeeded() isLoaded=\(isLoaded)")
-        guard !isLoaded else { return }
+        guard !AppRuntimeContext.isRunningTests else { return }
+        print("[STARTUP] BMapsService.loadIfNeeded() isLoaded=\(isLoaded) isLoading=\(isLoading)")
+        guard !isLoaded, !isLoading else { return }
 
         // Use the same folder the user picked in Settings → Library
         guard let folderPath = UserDefaults.standard.string(forKey: "modulesFolder"),
@@ -45,6 +54,7 @@ class BMapsService: ObservableObject {
         }
 
         print("[BMapsService] Found DB at \(dbURL.path) — parsing…")
+        isLoading = true
         let path = dbURL.path
         Task.detached(priority: .userInitiated) {
             let result = BMapsParser.parse(dbPath: path)
@@ -52,8 +62,10 @@ class BMapsService: ObservableObject {
                 guard let self else { return }
                 self.maps   = result.maps
                 self.places = result.places
+                self.loadedAtlasURL = dbURL
                 self.buildIndices()
                 self.isLoaded = true
+                self.isLoading = false
                 print("[BMapsService] Loaded \(result.maps.count) maps, \(result.places.count) places")
             }
         }
@@ -136,22 +148,91 @@ class BMapsService: ObservableObject {
             dir.appendingPathComponent("BMaps_dictionary.SQLite3"),
             dir.appendingPathComponent("BMaps_dictionary.sqlite3"),
             dir.appendingPathComponent("BMaps_dictionary.db"),
+            dir.appendingPathComponent("BibleMaps.dictionary.SQLite3"),
+            dir.appendingPathComponent("BibleMaps.dictionary.sqlite3"),
+            dir.appendingPathComponent("BibleAtlas.dictionary.SQLite3"),
+            dir.appendingPathComponent("BibleAtlas.dictionary.sqlite3"),
+            dir.appendingPathComponent("Atlas.dictionary.SQLite3"),
+            dir.appendingPathComponent("Atlas.dictionary.sqlite3"),
             dir.appendingPathComponent("BMaps.dictionary.graphe"),
-            dir.appendingPathComponent("BMaps_dictionary.graphe")
+            dir.appendingPathComponent("BMaps_dictionary.graphe"),
+            dir.appendingPathComponent("BibleMaps.dictionary.graphe"),
+            dir.appendingPathComponent("BibleAtlas.dictionary.graphe"),
+            dir.appendingPathComponent("Atlas.dictionary.graphe")
         ]
         if let hit = candidates.first(where: { fm.fileExists(atPath: $0.path) }) { return hit }
 
-        // Recursive search — match any file starting with bmaps.dictionary or bmaps_dictionary
+        // Recursive search — first prefer explicit atlas filenames, ordered
+        // from most-specific legacy compatibility to broader generic names.
         guard let enumerator = fm.enumerator(at: dir,
                                               includingPropertiesForKeys: nil,
                                               options: [.skipsHiddenFiles]) else { return nil }
+        var atlasNamedHits: [URL] = []
         for case let url as URL in enumerator {
             let name = url.lastPathComponent.lowercased()
-            if name.hasPrefix("bmaps.dictionary") || name.hasPrefix("bmaps_dictionary") {
+            let isAtlasNamed =
+                name.hasPrefix("bmaps.dictionary") ||
+                name.hasPrefix("bmaps_dictionary") ||
+                name.hasPrefix("biblemaps.dictionary") ||
+                name.hasPrefix("bibleatlas.dictionary") ||
+                name.hasPrefix("atlas.dictionary")
+            if isAtlasNamed {
+                atlasNamedHits.append(url)
+                continue
+            }
+        }
+
+        if let preferred = preferredAtlasURL(from: atlasNamedHits) {
+            return preferred
+        }
+
+        guard let fallbackEnumerator = fm.enumerator(at: dir,
+                                                     includingPropertiesForKeys: nil,
+                                                     options: [.skipsHiddenFiles]) else { return nil }
+        for case let url as URL in fallbackEnumerator {
+            guard ["sqlite3", "db", "graphe"].contains(url.pathExtension.lowercased()) else { continue }
+            if hasCompatibleAtlasSchema(at: url) {
+                print("[BMapsService] Falling back to schema-compatible atlas at \(url.path)")
                 return url
             }
         }
         return nil
+    }
+
+    private func preferredAtlasURL(from candidates: [URL]) -> URL? {
+        guard !candidates.isEmpty else { return nil }
+
+        func rank(for url: URL) -> Int {
+            let name = url.lastPathComponent.lowercased()
+            switch true {
+            case name == "bmaps.dictionary.sqlite3": return 0
+            case name == "bmaps.dictionary.db": return 1
+            case name == "bmaps.dictionary.graphe": return 2
+            case name == "bmaps_dictionary.sqlite3": return 3
+            case name == "bmaps_dictionary.db": return 4
+            case name == "bmaps_dictionary.graphe": return 5
+            case name.hasPrefix("bmaps.dictionary"): return 6
+            case name.hasPrefix("bmaps_dictionary"): return 7
+            case name.hasPrefix("biblemaps.dictionary"): return 8
+            case name.hasPrefix("bibleatlas.dictionary"): return 9
+            case name.hasPrefix("atlas.dictionary"): return 10
+            default: return 100
+            }
+        }
+
+        return candidates.sorted {
+            let lhsRank = rank(for: $0)
+            let rhsRank = rank(for: $1)
+            if lhsRank != rhsRank { return lhsRank < rhsRank }
+            return $0.path.localizedCaseInsensitiveCompare($1.path) == .orderedAscending
+        }.first
+    }
+
+    private func hasCompatibleAtlasSchema(at url: URL) -> Bool {
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(url.path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else { return false }
+        defer { sqlite3_close(db) }
+        return AtlasSchema.dictionarySource(in: db) != nil
     }
 }
 
@@ -164,10 +245,16 @@ extension BMapsService {
     /// Builds the full renderable HTML for a map article by substituting
     /// <!-- INCLUDE(filename) --> placeholders with base64 image data from content_fragments.
     func renderedHTML(for mapID: String) async -> String? {
-        guard let path = UserDefaults.standard.string(forKey: "modulesFolder"),
-              !path.isEmpty else { return nil }
-        let folder = URL(fileURLWithPath: path)
-        guard let dbURL = findDB(in: folder) else { return nil }
+        let dbURL: URL
+        if let loadedAtlasURL {
+            dbURL = loadedAtlasURL
+        } else {
+            guard let path = UserDefaults.standard.string(forKey: "modulesFolder"),
+                  !path.isEmpty else { return nil }
+            let folder = URL(fileURLWithPath: path)
+            guard let discovered = findDB(in: folder) else { return nil }
+            dbURL = discovered
+        }
 
         let dbPath = dbURL.path
         let id     = mapID
@@ -186,7 +273,8 @@ extension BMapsService {
 
         // Load CSS from info table
         var css = ""
-        if let stmt = prepare(db, "SELECT value FROM info WHERE name='html_style'") {
+        if AtlasSchema.infoTableExists(in: db),
+           let stmt = prepare(db, "SELECT value FROM info WHERE name='html_style'") {
             if sqlite3_step(stmt) == SQLITE_ROW {
                 let raw: String?
                 if isGraphe {
@@ -204,7 +292,13 @@ extension BMapsService {
 
         // Load map article HTML
         var articleHTML = ""
-        if let stmt = prepare(db, "SELECT definition FROM dictionary WHERE topic=?") {
+        guard let dictionarySource = AtlasSchema.dictionarySource(in: db) else { return nil }
+        let articleSQL = """
+        SELECT \(AtlasSchema.quotedIdentifier(dictionarySource.definitionColumn))
+        FROM \(AtlasSchema.quotedIdentifier(dictionarySource.table))
+        WHERE \(AtlasSchema.quotedIdentifier(dictionarySource.topicColumn))=?
+        """
+        if let stmt = prepare(db, articleSQL) {
             sqlite3_bind_text(stmt, 1, mapID, -1, SQLITE_TRANSIENT)
             if sqlite3_step(stmt) == SQLITE_ROW {
                 if isGraphe {
@@ -221,7 +315,13 @@ extension BMapsService {
 
         // Load all content_fragments for substitution
         var fragments: [String: String] = [:]
-        if let stmt = prepare(db, "SELECT id, fragment FROM content_fragments") {
+        if let fragmentsSource = AtlasSchema.fragmentsSource(in: db) {
+            let fragmentsSQL = """
+            SELECT \(AtlasSchema.quotedIdentifier(fragmentsSource.idColumn)),
+                   \(AtlasSchema.quotedIdentifier(fragmentsSource.fragmentColumn))
+            FROM \(AtlasSchema.quotedIdentifier(fragmentsSource.table))
+            """
+            if let stmt = prepare(db, fragmentsSQL) {
             while sqlite3_step(stmt) == SQLITE_ROW {
                 guard let idPtr = sqlite3_column_text(stmt, 0) else { continue }
                 let key = String(cString: idPtr)
@@ -242,6 +342,7 @@ extension BMapsService {
                 fragments[key] = BMapsService.fixBase64Padding(in: fragStr)
             }
             sqlite3_finalize(stmt)
+            }
         }
 
         // Substitute <!-- INCLUDE(key) --> placeholders

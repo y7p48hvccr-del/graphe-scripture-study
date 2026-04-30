@@ -118,14 +118,7 @@ struct CompanionPanel: View {
     // Strong's
     @State private var verseNoteIDs:      [UUID]            = []
     @State private var noteSearchText:    String            = ""
-    @State private var selectedVerseNote: Note?              = nil
-    /// Controller for the in-panel note editor. Provides keyboard-
-    /// shortcut bridge (Bold/Italic/Heading/Bullet) via the formatting
-    /// toolbar buttons. Same pattern NotesView uses in the Organizer.
-    @StateObject private var editorController = NoteEditorController()
-    /// Debounce timer for autosave — same 0.8s idle delay the Organizer
-    /// editor uses, so typing doesn't hammer the disk.
-    @State private var saveTimer:         Timer?            = nil
+    @State private var selectedVerseNoteID: UUID?            = nil
     /// Active filter for the unified Notes tab list: all, notes only,
     /// or bookmarks only. Three filter pills at the top of the Notes
     /// tab let the user switch.
@@ -164,9 +157,16 @@ struct CompanionPanel: View {
     @State private var xrefVerse:         Int               = 0    // verse to highlight in cross-ref passage
     // Live-filtered so deletions reflect immediately
     private var verseNotes: [Note] { notesManager.notes.filter { verseNoteIDs.contains($0.id) } }
+    private var selectedVerseNote: Note? {
+        guard let id = selectedVerseNoteID else { return nil }
+        return notesManager.notes.first(where: { $0.id == id })
+    }
     @State private var strongsNumber:    String            = ""
     @State private var strongsEntry:     StrongsEntry?     = nil
     @State private var strongsIsLoading: Bool              = false
+    @State private var selectedStrongsVerseTarget: VerseLinkTarget? = nil
+    @State private var strongsBackStack: [String]          = []
+    @State private var strongsForwardStack: [String]       = []
 
     // Dictionary / clipboard
     @State private var dictWord:         String            = ""
@@ -174,6 +174,7 @@ struct CompanionPanel: View {
     @State private var dictIsLoading:    Bool              = false
     @State private var encycWord:        String            = ""
     @State private var encycDefinition:  String?           = nil
+    @State private var encycDefinitionHTML: String?        = nil
     @State private var encycIsLoading:   Bool              = false
     @State private var pbCount:          Int               = 0
 
@@ -195,7 +196,6 @@ struct CompanionPanel: View {
             contentArea
         }
         .onAppear {
-            print("[STARTUP] CompanionPanel.onAppear book=\(bookNumber) ch=\(chapter)")
             load()
             #if os(macOS)
             pbCount = NSPasteboard.general.changeCount
@@ -221,14 +221,16 @@ struct CompanionPanel: View {
         .onChange(of: myBible.selectedEncyclopedia) { _, _ in
                 guard !encycWord.isEmpty else { return }
             encycDefinition = nil
+            encycDefinitionHTML = nil
             encycIsLoading  = true
             let word    = encycWord
             let service = myBible
             Task {
-                let result = await service.lookupWord(word: word, in: service.selectedEncyclopedia)
+                let result = await service.lookupLinkedWord(word: word, in: service.selectedEncyclopedia)
                 await MainActor.run {
                     encycWord       = result?.topic ?? word
                     encycDefinition = result?.definition
+                    encycDefinitionHTML = result?.definition
                     encycIsLoading  = false
                 }
             }
@@ -265,14 +267,16 @@ struct CompanionPanel: View {
             guard clean.count >= 2 else { return }
             encycWord       = clean
             encycDefinition = nil
+            encycDefinitionHTML = nil
             encycIsLoading  = true
             modeRaw         = CompanionMode.encyclopedia.rawValue
             let service     = myBible
             Task {
-                let result = await service.lookupWord(word: clean, in: service.selectedEncyclopedia)
+                let result = await service.lookupLinkedWord(word: clean, in: service.selectedEncyclopedia)
                 await MainActor.run {
                     encycWord       = result?.topic ?? clean
                     encycDefinition = result?.definition
+                    encycDefinitionHTML = result?.definition
                     encycIsLoading  = false
                 }
             }
@@ -290,20 +294,17 @@ struct CompanionPanel: View {
                   else { return }
             verseFilter       = VerseKey(bookNumber: bn, chapter: ch, verse: vs)
             savedFilter       = .notes
-            selectedVerseNote = nil
+            selectedVerseNoteID = nil
             modeRaw           = CompanionMode.notes.rawValue
         }
         .onReceive(NotificationCenter.default.publisher(for: Notification.Name("openNoteInCompanion"))) { notification in
-            print("[NOTE DEBUG] CompanionPanel received openNoteInCompanion")
             // Triggered by the popover "Make a Note" action after
             // creating a new note. Opens the note in the Notes-tab
             // drill-in editor without leaving the Bible tab.
             guard let note = notification.userInfo?["note"] as? Note else {
-                print("[NOTE DEBUG] CompanionPanel userInfo did NOT contain Note — dropping")
                 return
             }
-            print("[NOTE DEBUG] CompanionPanel opening note id=\(note.id) in drill-in")
-            selectedVerseNote = note
+            selectedVerseNoteID = note.id
             savedView         = .active
             verseFilter       = nil
             modeRaw           = CompanionMode.notes.rawValue
@@ -311,16 +312,9 @@ struct CompanionPanel: View {
         .onReceive(NotificationCenter.default.publisher(for: Notification.Name("strongsTapped"))) { note in
             guard let num = note.userInfo?["number"] as? String else { return }
             let bookNum      = note.userInfo?["bookNumber"] as? Int ?? 0
-            strongsNumber    = num
-            strongsEntry     = nil
-            strongsIsLoading = true
             modeRaw          = CompanionMode.strongs.rawValue
-            guard let module = myBible.selectedStrongs else { strongsIsLoading = false; return }
             let isOT = bookNum > 0 ? bookNum < 470 : !num.hasPrefix("G")
-            Task {
-                let entry = await myBible.lookupStrongs(module: module, number: num, isOldTestament: isOT)
-                await MainActor.run { strongsEntry = entry; strongsIsLoading = false }
-            }
+            loadStrongs(number: num, isOldTestament: isOT, pushHistory: false, clearForwardHistory: true)
         }
         .onReceive(NotificationCenter.default.publisher(for: Notification.Name("verseScrolledIntoView"))) { note in
             // Don't sync scroll if comparison is showing a cross-ref passage
@@ -351,15 +345,12 @@ struct CompanionPanel: View {
             // Tapping a verse in the main panel clears any cross-ref override
             xrefBook = nil; xrefChapter = nil; xrefVerse = 0; crossRefTarget = nil
             syncedVerse = vs
-            if syncedVerse > 0 { load() }
             if vs > 0 {
                 crossRefIsLoading = true
-                Task {
+                Task { @MainActor in
                     let groups = await myBible.lookupCrossReferences(book: bn, chapter: ch, verse: vs)
-                    await MainActor.run {
-                        crossRefGroups    = groups
-                        crossRefIsLoading = false
-                    }
+                    crossRefGroups    = groups
+                    crossRefIsLoading = false
                 }
             }
         }
@@ -463,12 +454,10 @@ struct CompanionPanel: View {
                     if syncedVerse > 0 {
                         crossRefIsLoading = true
                         let book = bookNumber; let ch = chapter; let vs = syncedVerse
-                        Task {
+                        Task { @MainActor in
                             let groups = await myBible.lookupCrossReferences(book: book, chapter: ch, verse: vs)
-                            await MainActor.run {
-                                crossRefGroups    = groups
-                                crossRefIsLoading = false
-                            }
+                            crossRefGroups    = groups
+                            crossRefIsLoading = false
                         }
                     }
                 }
@@ -606,7 +595,7 @@ struct CompanionPanel: View {
                 // ── Single note view (from verse tap) ──────────────
                 HStack {
                     Button {
-                        selectedVerseNote = nil
+                        selectedVerseNoteID = nil
                     } label: {
                         HStack(spacing: 4) {
                             Image(systemName: "chevron.left")
@@ -638,57 +627,66 @@ struct CompanionPanel: View {
                         .font(resolvedFont.weight(.semibold))
                         .foregroundStyle(theme.text)
                     if !note.verseReference.isEmpty {
-                        Text(note.verseReference)
-                            .font(.caption)
-                            .foregroundStyle(filigreeAccent)
+                        Button {
+                            var userInfo: [String: Any] = [
+                                "bookNumber": note.bookNumber,
+                                "chapter": note.chapterNumber
+                            ]
+                            if let verse = note.verseNumbers.first {
+                                userInfo["verse"] = verse
+                            }
+                            NotificationCenter.default.post(
+                                name: .navigateToPassage,
+                                object: nil,
+                                userInfo: userInfo
+                            )
+                        } label: {
+                            Text(note.verseReference)
+                                .font(.caption)
+                                .foregroundStyle(filigreeAccent)
+                        }
+                        .buttonStyle(.plain)
                     }
                 }
                 .padding(.horizontal, 12).padding(.top, 10).padding(.bottom, 4)
 
                 Divider()
 
-                // ── Formatting toolbar ───────────────────────────────
-                // Session 1: basic Markdown buttons wired to the same
-                // NoteEditorController the Organizer uses. Live
-                // Markdown rendering comes in Session 2.
-                HStack(spacing: 4) {
-                    FormatButton(label: "B", help: "Bold (**text**)") { editorController.bold() }
-                    FormatButton(label: "I", help: "Italic (*text*)")  { editorController.italic() }
-                    FormatButton(label: "H", help: "Heading (# line)") { editorController.heading() }
-                    FormatButton(label: "•", help: "Bullet (- line)")  { editorController.bullet() }
-                    Divider().frame(height: 16).padding(.horizontal, 4)
-                    Text("Markdown").font(.caption2).foregroundStyle(.tertiary)
-                    Spacer()
-                    // Small word-count indicator — useful for the
-                    // "serious notetaking" vibe without adding chrome.
-                    Text("\(note.wordCount) words")
+                HStack {
+                    Label("\(note.wordCount) words", systemImage: "doc.text")
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
+                    Spacer()
+                    Button {
+                        openNoteInNotes(note)
+                    } label: {
+                        Label("Open in Notes", systemImage: "square.and.pencil")
+                            .font(.caption.weight(.medium))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(filigreeAccent)
                 }
-                .padding(.horizontal, 12).padding(.vertical, 6)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
                 .background(Color.platformWindowBg)
 
                 Divider()
 
-                // ── Real editor (AppKit NSTextView-backed) ───────────
-                // NoteTextEditor handles Unicode, bidi (Hebrew RTL),
-                // undo, scrolling. Session 2 will add live Markdown
-                // syntax highlighting on top of this same editor.
-                NoteTextEditor(
-                    noteID:      note.id,
-                    initialText: note.content,
-                    onTextChange: { val in
-                        guard !note.isLocked else { return }
-                        var u = note
-                        u.content = val
-                        scheduleSave(u)
-                    },
-                    fontSize:    fontSize,
-                    fontName:    fontName,
-                    controller:  editorController,
-                    isEditable:  !note.isLocked
-                )
-                .id(note.id)
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 12) {
+                        if note.plainTextContent.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            Text("This note is empty. Open it in Notes to start writing.")
+                                .font(.callout)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            richNoteText(note)
+                                .textSelection(.enabled)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
                 .background(theme.background)
 
             } else {
@@ -839,8 +837,8 @@ struct CompanionPanel: View {
                     notesManager.delete(n)
                     // If the note was currently drilled-in, close back
                     // to the list so the trashed note isn't still shown.
-                    if selectedVerseNote?.id == n.id {
-                        selectedVerseNote = nil
+                    if selectedVerseNoteID == n.id {
+                        selectedVerseNoteID = nil
                     }
                 }
                 pendingNoteDelete = nil
@@ -1056,13 +1054,20 @@ struct CompanionPanel: View {
                         selectedIDs.insert(entryID)
                     }
                 } else {
-                    selectedVerseNote = note
+                    selectedVerseNoteID = note.id
                 }
             } label: {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(noteHeading(note))
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(theme.text).lineLimit(1)
+                    let preview = notePreview(note)
+                    if !preview.isEmpty {
+                        Text(preview)
+                            .font(.system(size: 11))
+                            .foregroundStyle(theme.text.opacity(0.65))
+                            .lineLimit(2)
+                    }
                     HStack(spacing: 6) {
                         if !note.verseReference.isEmpty {
                             Text(note.verseReference)
@@ -1072,13 +1077,6 @@ struct CompanionPanel: View {
                         Text(note.updatedAt, style: .date)
                             .font(.system(size: 10))
                             .foregroundStyle(.secondary)
-                    }
-                    let preview = notePreview(note)
-                    if !preview.isEmpty {
-                        Text(preview)
-                            .font(.system(size: 11))
-                            .foregroundStyle(theme.text.opacity(0.65))
-                            .lineLimit(2)
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -1356,16 +1354,6 @@ struct CompanionPanel: View {
         return result.sorted { $0.sortDate > $1.sortDate }
     }
 
-    /// Debounced autosave — fires 0.8s after the last keystroke. Matches
-    /// the Organizer editor's behaviour so typing rhythm feels the same
-    /// whether the user edits here or there.
-    private func scheduleSave(_ note: Note) {
-        saveTimer?.invalidate()
-        saveTimer = Timer.scheduledTimer(withTimeInterval: 0.8, repeats: false) { _ in
-            Task { @MainActor in self.notesManager.save(note) }
-        }
-    }
-
     private func noteHeading(_ note: Note) -> String {
         let first = note.content.components(separatedBy: "\n")
             .first(where: { !$0.trimmingCharacters(in: .whitespaces).isEmpty }) ?? ""
@@ -1375,10 +1363,44 @@ struct CompanionPanel: View {
     }
 
     private func notePreview(_ note: Note) -> String {
-        let lines = note.content.components(separatedBy: "\n")
+        let lines = note.plainTextContent.components(separatedBy: "\n")
             .filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
         guard lines.count > 1 else { return "" }
         return lines.dropFirst().prefix(3).joined(separator: " ")
+    }
+
+    @ViewBuilder
+    private func richNoteText(_ note: Note) -> some View {
+        #if os(macOS)
+        if let richDocument = note.richDocument {
+            let font = NSFont(name: fontName, size: fontSize) ?? NSFont.systemFont(ofSize: fontSize)
+            let attributed = RichNoteEditorBridge.attributedString(from: richDocument, baseFont: font)
+            if let swiftAttributed = try? AttributedString(attributed, including: \.appKit) {
+                Text(swiftAttributed)
+                    .foregroundStyle(theme.text)
+            } else {
+                Text(note.plainTextContent)
+                    .font(resolvedFont)
+                    .foregroundStyle(theme.text)
+            }
+        } else {
+            Text(note.plainTextContent)
+                .font(resolvedFont)
+                .foregroundStyle(theme.text)
+        }
+        #else
+        Text(note.plainTextContent)
+            .font(resolvedFont)
+            .foregroundStyle(theme.text)
+        #endif
+    }
+
+    private func openNoteInNotes(_ note: Note) {
+        notesManager.selectedNote = note
+        NotificationCenter.default.post(
+            name: Notification.Name("switchToNotesTab"),
+            object: nil
+        )
     }
 
     // MARK: - Clipboard
@@ -1402,12 +1424,14 @@ struct CompanionPanel: View {
         if mode == .encyclopedia {
             encycWord       = clean
             encycDefinition = nil
+            encycDefinitionHTML = nil
             encycIsLoading  = true
             Task {
-                let result = await service.lookupWord(word: clean, in: service.selectedEncyclopedia)
+                let result = await service.lookupLinkedWord(word: clean, in: service.selectedEncyclopedia)
                 await MainActor.run {
                     encycWord       = result?.topic ?? clean
                     encycDefinition = result?.definition
+                    encycDefinitionHTML = result?.definition
                     encycIsLoading  = false
                 }
             }
@@ -1521,6 +1545,7 @@ struct CompanionPanel: View {
                          ? "\(bmapsService.places.count) places · \(bmapsService.maps.count) maps"
                          : "Bible Maps")
                         .font(.caption).foregroundStyle(.secondary)
+                        .help(bmapsService.loadedAtlasURL?.path ?? "No atlas module loaded")
 
                 case .web:
                     Picker("", selection: $companionWebSiteID) {
@@ -1577,11 +1602,14 @@ struct CompanionPanel: View {
                     if strongsNumber.isEmpty {
                         Text("Tap a Strong's word to look up its definition")
                             .foregroundStyle(theme.secondary).font(resolvedFont)
-                    } else if strongsIsLoading {
-                        HStack { Spacer(); ProgressView(); Spacer() }
-                    } else if let entry = strongsEntry {
-                        strongsEntryView(entry)
                     } else {
+                        strongsHistoryBar
+                    }
+                    if !strongsNumber.isEmpty && strongsIsLoading {
+                        HStack { Spacer(); ProgressView(); Spacer() }
+                    } else if !strongsNumber.isEmpty, let entry = strongsEntry {
+                        strongsEntryView(entry)
+                    } else if !strongsNumber.isEmpty {
                         Text("No entry found for \(strongsNumber)")
                             .foregroundStyle(theme.secondary).font(resolvedFont)
                     }
@@ -1631,13 +1659,24 @@ struct CompanionPanel: View {
                             .foregroundStyle(theme.secondary).font(resolvedFont)
                     } else if encycIsLoading {
                         HStack { Spacer(); ProgressView(); Spacer() }
-                    } else if let def = encycDefinition {
+                    } else if let def = encycDefinitionHTML ?? encycDefinition {
                         Text(encycWord.capitalized)
                             .font(resolvedFont.weight(.bold))
                             .foregroundStyle(filigreeAccent)
-                        Text(def)
-                            .font(resolvedFont).lineSpacing(6)
-                            .foregroundStyle(theme.text)
+                        LinkedDefinitionView(
+                            html: def,
+                            font: resolvedFont,
+                            textColor: theme.text,
+                            accentColor: filigreeAccent,
+                            onVerseTap: { bookNumber, chapter, verse in
+                                NotificationCenter.default.post(
+                                    name: .navigateToPassage,
+                                    object: nil,
+                                    userInfo: ["bookNumber": bookNumber, "chapter": chapter, "verse": verse]
+                                )
+                            },
+                            onStrongsTap: { _ in }
+                        )
                     } else {
                         Text("No entry found for \"\(encycWord)\"")
                             .foregroundStyle(theme.secondary).font(resolvedFont)
@@ -1665,44 +1704,32 @@ struct CompanionPanel: View {
 
     @ViewBuilder
     private func strongsEntryView(_ entry: StrongsEntry) -> some View {
-        // Header: number + lexeme
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Text(strongsNumber)
-                .font(resolvedFont.weight(.bold)).foregroundStyle(filigreeAccent)
-            if !entry.lexeme.isEmpty {
-                Text(entry.lexeme).font(resolvedFont).foregroundStyle(theme.text)
+        StrongsPopoverWebView(
+            html: StrongsCardRenderer.html(for: entry),
+            onVerseTap: { target in
+                selectedStrongsVerseTarget = target
+            },
+            onStrongsTap: { tappedNumber in
+                loadStrongs(number: tappedNumber, pushHistory: true, clearForwardHistory: true)
             }
-            Spacer()
-        }
-        // Transliteration / pronunciation
-        if !entry.transliteration.isEmpty || !entry.pronunciation.isEmpty {
-            Text([entry.transliteration, entry.pronunciation]
-                    .filter { !$0.isEmpty }.joined(separator: "  ·  "))
-                .font(resolvedFont.italic()).foregroundStyle(theme.secondary)
-        }
-        // Cross-references (ETCBC#, TWOT, GK, Greek/Hebrew equivalents)
-        if !entry.references.isEmpty {
-            Divider()
-            Text(entry.references)
-                .font(.system(size: CGFloat(fontSize) * 0.85))
-                .foregroundStyle(theme.secondary)
-                .lineSpacing(4)
-        }
-        Divider()
-        // Strong's definition — prefer strongsDefinition, fall back to shortDefinition
-        let definition = entry.strongsDefinition.isEmpty ? entry.shortDefinition : entry.strongsDefinition
-        if !definition.isEmpty {
-            Text("Strong's").font(resolvedFont.weight(.semibold)).foregroundStyle(theme.secondary)
-            LinkedDefinitionView(
-                html: definition,
-                font: resolvedFont,
-                textColor: theme.text,
-                accentColor: filigreeAccent,
-                onVerseTap: { _, _, _ in },
-                onStrongsTap: { _ in }
+        )
+        .frame(minHeight: 240, idealHeight: 360)
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(filigreeAccent.opacity(0.18), lineWidth: 1)
+        )
+        .popover(item: $selectedStrongsVerseTarget, arrowEdge: .bottom) { target in
+            VersePreviewPopover(
+                bookNumber: target.bookNumber,
+                chapter: target.chapter,
+                verseStart: target.verseStart,
+                verseEnd: target.verseEnd,
+                accent: filigreeAccent
             )
+            .frame(width: 320)
         }
-        if !entry.derivation.isEmpty {
+        if !entry.hasExpandedDefinition && !entry.derivation.isEmpty {
             Divider()
             Text("Derivation").font(resolvedFont.weight(.semibold)).foregroundStyle(theme.secondary)
             LinkedDefinitionView(
@@ -1714,7 +1741,7 @@ struct CompanionPanel: View {
                 onStrongsTap: { _ in }
             )
         }
-        if !entry.kjv.isEmpty {
+        if !entry.hasExpandedDefinition && !entry.kjv.isEmpty {
             Divider()
             Text("KJV Usage").font(resolvedFont.weight(.semibold)).foregroundStyle(theme.secondary)
             LinkedDefinitionView(
@@ -1735,6 +1762,74 @@ struct CompanionPanel: View {
                                   module: myBible.selectedStrongs ?? myBible.selectedDictionary)
                 }
                 Spacer()
+            }
+        }
+    }
+
+    private var strongsHistoryBar: some View {
+        HStack(spacing: 10) {
+            Button {
+                guard let previous = strongsBackStack.popLast() else { return }
+                if !strongsNumber.isEmpty {
+                    strongsForwardStack.append(strongsNumber)
+                }
+                loadStrongs(number: previous, pushHistory: false, clearForwardHistory: false)
+            } label: {
+                Image(systemName: "chevron.left")
+            }
+            .buttonStyle(.plain)
+            .disabled(strongsBackStack.isEmpty)
+            .opacity(strongsBackStack.isEmpty ? 0.35 : 1)
+
+            Button {
+                guard let next = strongsForwardStack.popLast() else { return }
+                if !strongsNumber.isEmpty {
+                    strongsBackStack.append(strongsNumber)
+                }
+                loadStrongs(number: next, pushHistory: false, clearForwardHistory: false)
+            } label: {
+                Image(systemName: "chevron.right")
+            }
+            .buttonStyle(.plain)
+            .disabled(strongsForwardStack.isEmpty)
+            .opacity(strongsForwardStack.isEmpty ? 0.35 : 1)
+
+            Spacer()
+
+            Text(strongsNumber)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(theme.secondary)
+        }
+    }
+
+    private func loadStrongs(
+        number: String,
+        isOldTestament: Bool? = nil,
+        pushHistory: Bool = false,
+        clearForwardHistory: Bool = true
+    ) {
+        let normalised = number.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalised.isEmpty else { return }
+        if pushHistory && !strongsNumber.isEmpty && strongsNumber != normalised {
+            strongsBackStack.append(strongsNumber)
+        }
+        strongsNumber = normalised
+        strongsEntry = nil
+        strongsIsLoading = true
+        selectedStrongsVerseTarget = nil
+        if clearForwardHistory {
+            strongsForwardStack.removeAll()
+        }
+        guard let module = myBible.selectedStrongs else {
+            strongsIsLoading = false
+            return
+        }
+        let isOT = isOldTestament ?? !normalised.uppercased().hasPrefix("G")
+        Task {
+            let entry = await myBible.lookupStrongs(module: module, number: normalised, isOldTestament: isOT)
+            await MainActor.run {
+                strongsEntry = entry
+                strongsIsLoading = false
             }
         }
     }
@@ -1854,9 +1949,7 @@ struct CompanionPanel: View {
 
     private var commentaryContent: some View {
         ScrollViewReader { proxy in
-            // Use VStack not LazyVStack — LazyVStack causes erratic scrolling
-            // in very large commentaries like Biblical Illustrator
-            VStack(alignment: .leading, spacing: 0) {
+            LazyVStack(alignment: .leading, spacing: 0) {
                 ForEach(commentaryEntries) { entry in
                     let isSynced = syncedVerse > 0 &&
                         entry.verseFrom <= syncedVerse && syncedVerse <= entry.verseTo
@@ -1871,20 +1964,20 @@ struct CompanionPanel: View {
                     .padding(.horizontal, 6).padding(.vertical, 8)
                     .background(isSynced ? filigreeAccent.opacity(0.08) : Color.clear)
                     .clipShape(RoundedRectangle(cornerRadius: 6))
-                    .id(entry.verseFrom)
+                    .id(entry.id)
                 }
             }
             .onChange(of: commentaryEntries) { _, _ in
                 guard syncedVerse > 0,
                       let entry = bestEntry(for: syncedVerse) else { return }
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                    withAnimation { proxy.scrollTo(entry.verseFrom, anchor: .top) }
+                    proxy.scrollTo(entry.id, anchor: .top)
                 }
             }
             .onChange(of: syncedVerse) { _, v in
                 guard v > 0, !commentaryEntries.isEmpty,
                       let entry = bestEntry(for: v) else { return }
-                withAnimation { proxy.scrollTo(entry.verseFrom, anchor: .top) }
+                proxy.scrollTo(entry.id, anchor: .top)
             }
         }
     }
@@ -1908,7 +2001,10 @@ struct CompanionPanel: View {
             Task {
                 let entries = await myBible.fetchCommentaryEntries(module: module,
                                                                    bookNumber: bookNumber, chapter: chapter)
-                await MainActor.run { commentaryEntries = entries; isLoading = false }
+                await MainActor.run {
+                    commentaryEntries = entries
+                    isLoading = false
+                }
             }
         }
     }

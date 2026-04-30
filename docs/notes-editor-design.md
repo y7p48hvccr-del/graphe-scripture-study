@@ -55,6 +55,249 @@ Longer-term desired editor capabilities:
 - insert passage
 - tags
 
+## Rich Editor Foundation
+
+This section is the concrete recommendation for the next editor generation.
+
+### Core Decision
+
+The next richer editor should **not** use raw RTF or `NSAttributedString` data as the only persisted source of truth.
+
+Why:
+
+- raw attributed-text blobs are opaque and hard to reason about
+- they are poor for migration and testing
+- study-specific semantics like scripture links, Strong's links, and note links should not depend on fragile editor-only attributes
+- the previous failed rich-text pass showed that tying persistence too directly to editor internals is risky
+
+Recommended split:
+
+- the **editor runtime model** may still use `NSTextView` / `NSAttributedString` on macOS
+- the **persisted note model** should be a structured rich-note document format
+- plain text remains available as a compatibility/search/export fallback
+
+### Recommended Persisted Model
+
+Add an optional richer payload to `Note`, but keep plain text for compatibility.
+
+Recommended conceptual model:
+
+- `Note.title`
+- `Note.content`
+  - plain-text fallback, preview text, export fallback, search base
+- `Note.richDocument`
+  - optional structured payload
+
+Recommended `RichNoteDocument` shape:
+
+- `version`
+- `plainText`
+- `blocks`
+- `inlineRuns`
+- `links`
+
+Recommended block model:
+
+- paragraph
+- heading levels
+- bullet list item
+- numbered list item
+- quote block later if needed
+
+Recommended inline style model:
+
+- bold
+- italic
+- underline later if needed
+- code later if needed
+
+Recommended link model:
+
+- scripture reference link
+- Strong's link
+- URL
+- note link
+
+This means the editor can render rich text visually while persistence stays explicit, migratable, and testable.
+
+### Why Structured Document Beats Raw RTF
+
+Structured rich-note JSON gives us:
+
+- deterministic migrations
+- easier validation
+- future portability beyond AppKit
+- explicit study semantics
+- simpler plain-text derivation
+
+Raw RTF can still exist as a temporary editor interchange format in memory if useful, but it should not be the long-term stored contract.
+
+### Editor Runtime Model
+
+The editor layer should have a dedicated runtime type, separate from `Note`.
+
+Recommended runtime boundary:
+
+- `RichNoteDocument`
+  - persisted representation
+- `NoteEditorState`
+  - current editing state, selection state, dirty state
+- `RichNoteBridge`
+  - converts between `RichNoteDocument` and `NSAttributedString`
+
+The `NSTextView` should be a rendering/editing surface, not the owner of note truth.
+
+### Save Boundaries
+
+The next rich editor should save using explicit boundaries rather than serializing all editor state on every change.
+
+Recommended save strategy:
+
+- plain text updates after a short debounce
+- rich document updates after a slightly longer debounce or idle boundary
+- final flush on losing focus / closing note / app lifecycle boundary
+- skip save if both plain text and rich payload are unchanged
+
+This is intentionally conservative.
+
+### Search, Preview, and Word Count
+
+These should continue to depend on plain text, not on rich rendering.
+
+That means:
+
+- search index uses `Note.content`
+- preview snippets use `Note.content`
+- word count uses `Note.content`
+- rich formatting never becomes required for basic note operations
+
+This preserves robustness even if rich payload is missing or partially migrated.
+
+### Link Semantics
+
+Study-specific links should be first-class note semantics, not only visual styling.
+
+Recommended link payload fields:
+
+- range
+- kind
+  - scripture
+  - strongs
+  - url
+  - note
+- target payload
+
+Examples:
+
+- scripture target: book/chapter/verse set
+- Strong's target: number plus testament context if needed
+- note target: note UUID
+
+This allows:
+
+- stable re-rendering
+- future re-theming
+- click behavior independent of editor internals
+
+### Migration Strategy
+
+Migration must be incremental and reversible.
+
+Recommended rules:
+
+- old notes with only `content: String` continue to load unchanged
+- first rich edit generates `richDocument`
+- plain text is always regenerated from the rich document on save
+- notes without `richDocument` continue to behave as plain notes
+
+So migration is:
+
+- lazy
+- per-note
+- backward-compatible
+
+### Recommended File Format Evolution
+
+Do not replace the current line-based note format abruptly.
+
+Recommended next step:
+
+- keep current header fields for note metadata
+- keep `---` separator
+- after the separator, store a small structured body envelope instead of plain free text for rich notes
+
+Conceptual body envelope:
+
+- `mode: plain | rich`
+- `plainText`
+- `richDocument`
+
+Plain notes can continue storing body text directly during transition if that keeps migration simpler.
+
+Longer-term, a JSON body envelope is cleaner than trying to infer format from arbitrary text.
+
+### Companion and Notes Responsibilities
+
+With a richer editor, the ownership boundary should stay strict.
+
+`Notes` should own:
+
+- rich editing
+- formatting commands
+- migration of notes into rich form
+- advanced insertions and note-linking
+
+`Companion` should own:
+
+- reading
+- contextual opening
+- verse-linked filtering
+- handoff to `Notes`
+
+This reduces the chance of future editor regressions spilling back into Bible interaction.
+
+## Monetization Rule
+
+This is an app-wide architectural rule, not only a notes rule.
+
+The app should support:
+
+- trials
+- subscriptions
+- one-time unlocks
+- tiered premium capability gates
+
+But those monetization choices must operate at the capability layer, not the data-survival layer.
+
+Required rule:
+
+- user content must remain readable and durable even when premium access expires
+
+That means:
+
+- premium can gate advanced editing
+- premium can gate richer study intelligence
+- premium can gate advanced export and workflow features
+- premium should not make persisted user notes unreadable
+- premium should not make core user data depend on an active entitlement
+
+For notes specifically:
+
+- plain-text fallback must remain readable
+- rich-note payload must remain loadable
+- premium may control whether the user can use richer editing tools
+- premium may control enrichment features like scripture auto-linking, Strong's linking, tags, or note links
+
+This same principle should apply across the rest of the app UI.
+
+## Concrete Next Code Step
+
+The next code step after this document is:
+
+- add the concrete `RichNoteDocument` model types without replacing the current editor
+- keep them isolated from the shipping editor path at first
+- then build the bridge layer and migration logic on top of those types
+
 ## Architecture Direction
 
 ### 1. Editing Ownership
@@ -228,13 +471,17 @@ Potential features:
 
 The next implementation step should be:
 
-- continue Phase 1 and Phase 2 only
+- formalize the rich editor contract before implementation
 
-That means:
+Concrete immediate tasks:
 
-- do not attempt rich text yet
-- do not change note storage format yet
-- first consolidate the editing path and reduce duplication
+- add concrete model types for the next rich-note phase on paper first
+- decide exact persisted shape for `RichNoteDocument`
+- decide how `Note.content` is regenerated from rich data
+- decide which formatting features are in scope for v1
+- keep the current markdown editor shipping until those decisions are complete
+
+Only after those choices are fixed should code move into the next phase.
 
 ## Notes
 

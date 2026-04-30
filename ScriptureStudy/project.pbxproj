@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		17FA1EA9BA104BA69CD820ED /* NotesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 522B7EE638E44F41B7CBBE03 /* NotesView.swift */; };
 		1ABC05B708364A0DAEFE8754 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = E9B1FF20331446398DE59454 /* Assets.xcassets */; };
+		1C8F4B4D2B7E4B4A9A1A0001 /* Merged_Strongs_Dictionary.SQLite3 in Resources */ = {isa = PBXBuildFile; fileRef = 1C8F4B4D2B7E4B4A9A1A0002 /* Merged_Strongs_Dictionary.SQLite3 */; };
 		3BD60D02C663473C9A1D1C76 /* Note.swift in Sources */ = {isa = PBXBuildFile; fileRef = 40C2EA3BCAD2471FB9AFF436 /* Note.swift */; };
 		549285F870AA4F72B06A2B0E /* AnthropicService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 67F37C058EB349CA903CEF61 /* AnthropicService.swift */; };
 		56AE9E44D9D04C67BDDA3DD5 /* ChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1EAB7EED82264FC8B8742450 /* ChatView.swift */; };
@@ -77,6 +78,7 @@
 		127AEC7389F44E88960FD0A4 /* Bookmark.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Bookmark.swift; sourceTree = "<group>"; };
 		1B6960210E9945AFB0E7F8A6 /* libsqlite3.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = libsqlite3.tbd; path = usr/lib/libsqlite3.tbd; sourceTree = SDKROOT; };
 		1C5AF6D323D84DAF88B2B4DC /* AICircuitBackground.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AICircuitBackground.swift; sourceTree = "<group>"; };
+		1C8F4B4D2B7E4B4A9A1A0002 /* Merged_Strongs_Dictionary.SQLite3 */ = {isa = PBXFileReference; lastKnownFileType = file; path = Merged_Strongs_Dictionary.SQLite3; sourceTree = "<group>"; };
 		1EAB7EED82264FC8B8742450 /* ChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatView.swift; sourceTree = "<group>"; };
 		2BD78A9018024E30A0EA57DB /* SearchResult.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchResult.swift; sourceTree = "<group>"; };
 		2DF70CD5C9314429B8342AB2 /* DictionaryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DictionaryView.swift; sourceTree = "<group>"; };
@@ -187,6 +189,7 @@
 				1C5AF6D323D84DAF88B2B4DC /* AICircuitBackground.swift */,
 				67F37C058EB349CA903CEF61 /* AnthropicService.swift */,
 				E9B1FF20331446398DE59454 /* Assets.xcassets */,
+				1C8F4B4D2B7E4B4A9A1A0002 /* Merged_Strongs_Dictionary.SQLite3 */,
 				56491E4004704D1AB3E8B142 /* BibleAPIService.swift */,
 				476899528A7842FBB0D04198 /* BibleData.swift */,
 				68686F462F8803D300DE99ED /* BibleMapsView.swift */,
@@ -314,6 +317,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				1C8F4B4D2B7E4B4A9A1A0001 /* Merged_Strongs_Dictionary.SQLite3 in Resources */,
 				68FECE6B2F85DD600096B5F8 /* project.pbxproj in Resources */,
 				68DBD4C72F83EF1E000E9BE4 /* ScriptureStudy.help in Resources */,
 				68FECE822F85EB550096B5F8 /* BibleTimeline.json in Resources */,

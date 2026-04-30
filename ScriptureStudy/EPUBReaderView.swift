@@ -2,18 +2,22 @@ import SwiftUI
 import WebKit
 import ZIPFoundation
 
-// BOOKMARK_FIX_V7 — 2026-04-20 — abandoned overlay approach entirely.
-// Bookmark button moved into the existing .toolbar modifier as another
-// ToolbarItem (native macOS pattern — Safari, Preview, Books app all do
-// this). Search bar converted from overlay to a real VStack child at the
-// top of the reader; claims layout space when showSearch is true and
-// physically pushes the WebView below it.
-// Diagnosis: SwiftUI overlays are not rendering in this view tree
-// (HSplitView > ZStack > NSViewRepresentable). Tried overlays on the
-// NSViewRepresentable (V5) and the ZStack (V6) — neither rendered. The
-// bookmark icon was invisible regardless of placement, which ruled
-// overlay rendering out as a viable mechanism here. Plain VStack/HStack
-// children and ToolbarItems are the reliable path.
+// BOOKMARK_FIX_V9 — 2026-04-21 — silk ribbon removed (per user
+// direction). Toolbar bookmark is now the sole bookmark control,
+// matching PDF V8/V9 for full reader-shell consistency. All bookmark
+// indicators across the app (this reader's toolbar, this reader's
+// sidebar list, PDF reader, Bible reader, NotesView, the unified
+// bookmarks panel) now use ox-blood (SilkBookmarkRibbonView.silkRed)
+// as the bookmark identity colour. Bookmark mutations post
+// .libraryBookmarksChanged so the unified panel refreshes immediately
+// rather than waiting for next .onAppear.
+//
+// V8 (superseded) — decorative silk ribbon. Visually nice, but PDF
+// couldn't replicate it without scroll-related render quirks, and
+// consistency across readers won out over the flourish.
+// V7 (still in effect for the rest) — bookmark + in-book search
+// controls in the window toolbar; search bar drops down as a real
+// VStack child.
 
 /// Serial queue for all ZIPFoundation Archive access — Archive is NOT thread-safe.
 private let epubArchiveQueue = DispatchQueue(label: "com.graphe.epub.archive", qos: .userInitiated)
@@ -159,6 +163,20 @@ struct EPUBReaderView: View {
                             .transition(.move(edge: .bottom).combined(with: .opacity))
                             .zIndex(10)
                         }
+                        // Silk bookmark ribbon — purely decorative, drops
+                        // down from the top of the reader when the current
+                        // page is bookmarked. Non-interactive (toggle is
+                        // in the toolbar). Slightly inset from the right
+                        // edge to clear the scrollbar. Animates in/out
+                        // gently when bookmark state changes.
+                        // Wrapped in a full-extent VStack→HStack so the
+                        // ZStack(.bottom) alignment doesn't pull this
+                        // child to the bottom — we want it pinned to the
+                        // top-right of the reader.
+                        // Silk ribbon removed (2026-04-21). Bookmark
+                        // state is now signalled by the toolbar bookmark
+                        // button alone — same as PDF — for consistency
+                        // across the three reader types.
                         } // end ZStack(.bottom)
                         .animation(.spring(response: 0.35), value: showScripturePanel)
                     } // end VStack
@@ -187,16 +205,15 @@ struct EPUBReaderView: View {
                                 Image(systemName: "magnifyingglass")
                                     .foregroundStyle(showSearch ? accent : .primary)
                             }.help("Search in this book")
-                            // Bookmark button moved into the window toolbar
-                            // (V7). Previously lived as an overlay on the
-                            // reading content, which wasn't rendering in
-                            // this view tree. Toolbar placement is the
-                            // native macOS pattern anyway (Safari, Preview,
-                            // Books app all do this).
+                            // Bookmark button — the only bookmark control
+                            // in the EPUB reader. Active colour is ox-blood
+                            // (SilkBookmarkRibbonView.silkRed), the
+                            // app-wide bookmark identity colour used
+                            // everywhere a bookmark appears.
                             if archive != nil && !currentHref.isEmpty {
                                 Button { toggleBookmark() } label: {
                                     Image(systemName: isBookmarked ? "bookmark.fill" : "bookmark")
-                                        .foregroundStyle(isBookmarked ? accent : .primary)
+                                        .foregroundStyle(isBookmarked ? SilkBookmarkRibbonView.silkRed : .primary)
                                 }.help(isBookmarked ? "Remove bookmark" : "Bookmark this page")
                             }
                         }
@@ -246,6 +263,9 @@ struct EPUBReaderView: View {
             ))
         }
         saveBookmarks()
+        // Notify the unified bookmarks panel so it refreshes immediately
+        // rather than waiting for the next .onAppear.
+        NotificationCenter.default.post(name: .libraryBookmarksChanged, object: nil)
     }
 
     func saveBookmarks() {
@@ -360,15 +380,17 @@ struct EPUBReaderView: View {
                                     Rectangle().fill(Color.clear).frame(width: 8)
                                     Image(systemName: "bookmark.fill")
                                         .font(.system(size: 9))
-                                        .foregroundStyle(accent)
+                                        .foregroundStyle(SilkBookmarkRibbonView.silkRed)
                                     Text(bm.title)
                                         .font(.system(size: 12))
-                                        .foregroundStyle(currentHref == bm.href ? accent : .primary)
+                                        .foregroundStyle(currentHref == bm.href ? SilkBookmarkRibbonView.silkRed : .primary)
                                         .lineLimit(1)
                                     Spacer()
                                     Button {
                                         bookmarks.removeAll { $0.id == bm.id }
                                         saveBookmarks()
+                                        NotificationCenter.default.post(
+                                            name: .libraryBookmarksChanged, object: nil)
                                     } label: {
                                         Image(systemName: "xmark")
                                             .font(.system(size: 9))

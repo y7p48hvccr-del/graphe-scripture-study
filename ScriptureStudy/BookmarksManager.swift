@@ -54,13 +54,19 @@ class BookmarksManager: ObservableObject {
     // MARK: - Public API
 
     func isBookmarked(book: Int, chapter: Int) -> Bool {
-        bookmarks.contains { $0.bookNumber == book && $0.chapterNumber == chapter && $0.verseNumber == nil }
+        bookmarks.contains {
+            $0.deletedAt == nil &&
+            $0.bookNumber == book &&
+            $0.chapterNumber == chapter &&
+            $0.verseNumber == nil
+        }
     }
 
     /// Verse-level bookmark check. Use this for the inline icons next to
     /// verse numbers.
     func isBookmarked(book: Int, chapter: Int, verse: Int) -> Bool {
         bookmarks.contains {
+            $0.deletedAt == nil &&
             $0.bookNumber == book &&
             $0.chapterNumber == chapter &&
             $0.verseNumber == verse
@@ -70,17 +76,25 @@ class BookmarksManager: ObservableObject {
     /// Returns the set of verse numbers in the given chapter that have
     /// bookmarks. Used by the Bible reader to render inline icons
     /// efficiently — one set lookup per verse instead of a linear scan.
+    /// Excludes trashed bookmarks.
     func bookmarkedVerses(book: Int, chapter: Int) -> Set<Int> {
         var result: Set<Int> = []
-        for bm in bookmarks where bm.bookNumber == book && bm.chapterNumber == chapter {
+        for bm in bookmarks where bm.deletedAt == nil
+                               && bm.bookNumber == book
+                               && bm.chapterNumber == chapter {
             if let v = bm.verseNumber { result.insert(v) }
         }
         return result
     }
 
     func toggle(book: Int, chapter: Int) {
+        // Active-only match — if the only matching bookmark is trashed,
+        // toggle creates a new active one rather than un-trashing.
         if let idx = bookmarks.firstIndex(where: {
-            $0.bookNumber == book && $0.chapterNumber == chapter && $0.verseNumber == nil
+            $0.deletedAt == nil &&
+            $0.bookNumber == book &&
+            $0.chapterNumber == chapter &&
+            $0.verseNumber == nil
         }) {
             bookmarks.remove(at: idx)
         } else {
@@ -93,16 +107,18 @@ class BookmarksManager: ObservableObject {
     /// action calls this too.
     func toggle(book: Int, chapter: Int, verse: Int) {
         if let idx = bookmarks.firstIndex(where: {
+            $0.deletedAt == nil &&
             $0.bookNumber == book &&
             $0.chapterNumber == chapter &&
             $0.verseNumber == verse
         }) {
             bookmarks.remove(at: idx)
         } else {
-            // Defensive: if a bookmark for this exact verse already
-            // exists (e.g. via a race with iCloud load), do not insert
-            // a duplicate.
+            // Defensive: if an active bookmark for this exact verse
+            // already exists (e.g. via a race with iCloud load), do
+            // not insert a duplicate.
             let exists = bookmarks.contains {
+                $0.deletedAt == nil &&
                 $0.bookNumber == book &&
                 $0.chapterNumber == chapter &&
                 $0.verseNumber == verse
@@ -116,7 +132,49 @@ class BookmarksManager: ObservableObject {
         }
     }
 
+    // MARK: - Delete / Trash
+    //
+    // Design (2026-04-21):
+    //  - delete(_:)           — PERMANENT for bookmarks (individual
+    //                           removal always permanent, per user
+    //                           direction). Warning dialog shown by
+    //                           callers.
+    //  - moveToTrash(_:)      — used by bulk-delete flow. Sets
+    //                           deletedAt rather than removing from
+    //                           the array.
+    //  - restore(_:)          — clear deletedAt
+    //  - deletePermanently(_:) — called from Trash view or Empty Trash
+    //  - emptyTrash()         — permanently delete all trashed bookmarks
+
+    /// PERMANENT delete of a single bookmark. Called from the individual
+    /// row-trash affordance, the sidebar X, the verse popover's
+    /// "Remove Bookmark", etc. Callers should show a warning dialog
+    /// before invoking this.
     func delete(_ bookmark: Bookmark) {
         bookmarks.removeAll { $0.id == bookmark.id }
+    }
+
+    /// Soft-delete — move to Trash. Used by bulk-delete flow from
+    /// the CompanionPanel unified list. Recoverable via restore(_:)
+    /// until the user empties the Trash.
+    func moveToTrash(_ bookmark: Bookmark) {
+        guard let idx = bookmarks.firstIndex(where: { $0.id == bookmark.id }) else { return }
+        bookmarks[idx].deletedAt = Date()
+    }
+
+    /// Restore a trashed bookmark back to active.
+    func restore(_ bookmark: Bookmark) {
+        guard let idx = bookmarks.firstIndex(where: { $0.id == bookmark.id }) else { return }
+        bookmarks[idx].deletedAt = nil
+    }
+
+    /// Hard-delete a trashed bookmark.
+    func deletePermanently(_ bookmark: Bookmark) {
+        bookmarks.removeAll { $0.id == bookmark.id }
+    }
+
+    /// Permanently delete every bookmark currently in Trash.
+    func emptyTrash() {
+        bookmarks.removeAll { $0.deletedAt != nil }
     }
 }

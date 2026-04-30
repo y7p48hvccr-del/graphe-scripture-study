@@ -2,7 +2,7 @@ import Foundation
 
 // MARK: - Chat Message
 
-struct ChatMessage: Identifiable, Codable {
+struct ChatMessage: Identifiable, Codable, Equatable {
     var id      = UUID()
     let role:    String
     let content: String

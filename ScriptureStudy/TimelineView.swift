@@ -78,22 +78,22 @@ struct TimelineView: View {
             VStack(spacing: 0) {
                 HStack(spacing: 8) {
                     Text(filterBook && !bookCode.isEmpty ? bookName : "All Events")
-                        .font(.system(size: 12, weight: .semibold))
+                        .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(.secondary)
                     Spacer()
                     Toggle("This book", isOn: $filterBook)
                         #if os(macOS)
                         .toggleStyle(.checkbox)
                         #endif
-                        .font(.system(size: 11))
+                        .font(.system(size: 12))
                         .foregroundStyle(.secondary)
                 }
                 HStack {
                     Image(systemName: "hand.tap")
-                        .font(.system(size: 9))
+                        .font(.system(size: 10))
                         .foregroundStyle(.tertiary)
                     Text("Tap any event for scholarly notes and sources")
-                        .font(.system(size: 10))
+                        .font(.system(size: 11))
                         .foregroundStyle(.tertiary)
                     Spacer()
                 }
@@ -138,7 +138,7 @@ struct TimelineView: View {
             // Disclaimer
             Divider()
             Text(noteText)
-                .font(.system(size: 10))
+                .font(.system(size: 11))
                 .foregroundStyle(.tertiary)
                 .padding(.horizontal, 12).padding(.vertical, 6)
                 .fixedSize(horizontal: false, vertical: true)
@@ -180,7 +180,7 @@ struct TimelineRow: View {
         HStack(alignment: .top, spacing: 10) {
             // Year
             Text(yearLabel)
-                .font(.system(size: 10, weight: .medium))
+                .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(.secondary)
                 .frame(width: 44, alignment: .trailing)
                 .padding(.top, 2)
@@ -201,12 +201,12 @@ struct TimelineRow: View {
             // Title
             VStack(alignment: .leading, spacing: 2) {
                 Text(event.title)
-                    .font(.system(size: 12, weight: isSelected ? .semibold : .regular))
+                    .font(.system(size: 13, weight: isSelected ? .semibold : .regular))
                     .foregroundStyle(isSelected ? accent : .primary)
                     .fixedSize(horizontal: false, vertical: true)
                 if !event.books.isEmpty {
                     Text(event.books.joined(separator: ", "))
-                        .font(.system(size: 10))
+                        .font(.system(size: 11))
                         .foregroundStyle(.tertiary)
                 }
             }
@@ -215,10 +215,10 @@ struct TimelineRow: View {
             Spacer()
             if isSelected {
                 Image(systemName: "chevron.up")
-                    .font(.system(size: 9)).foregroundStyle(.secondary).padding(.top, 6)
+                    .font(.system(size: 10)).foregroundStyle(.secondary).padding(.top, 6)
             } else {
                 Image(systemName: "chevron.down")
-                    .font(.system(size: 9)).foregroundStyle(.tertiary).padding(.top, 6)
+                    .font(.system(size: 10)).foregroundStyle(.tertiary).padding(.top, 6)
             }
         }
         .padding(.horizontal, 10)
@@ -238,7 +238,7 @@ struct TimelineDetail: View {
 
             // Description
             Text(event.description)
-                .font(.system(size: 12))
+                .font(.system(size: 14))
                 .foregroundStyle(.primary)
                 .fixedSize(horizontal: false, vertical: true)
 
@@ -246,10 +246,10 @@ struct TimelineDetail: View {
             if let rationale = event.dateRationale {
                 Divider()
                 Label("Why this date", systemImage: "calendar.badge.clock")
-                    .font(.system(size: 10, weight: .semibold))
+                    .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(.secondary)
                 Text(rationale)
-                    .font(.system(size: 11))
+                    .font(.system(size: 13))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -258,10 +258,10 @@ struct TimelineDetail: View {
             if let debate = event.debate {
                 Divider()
                 Label("Scholarly debate", systemImage: "text.bubble")
-                    .font(.system(size: 10, weight: .semibold))
+                    .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(.secondary)
                 Text(debate)
-                    .font(.system(size: 11))
+                    .font(.system(size: 13))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -270,7 +270,7 @@ struct TimelineDetail: View {
             if let perspectives = event.perspectives, !perspectives.isEmpty {
                 Divider()
                 Label("Perspectives on origins", systemImage: "person.3")
-                    .font(.system(size: 10, weight: .semibold))
+                    .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(.secondary)
                 ForEach(perspectives, id: \.label) { p in
                     PerspectiveCard(perspective: p, accent: accent)
@@ -281,15 +281,15 @@ struct TimelineDetail: View {
             if let sources = event.sources, !sources.isEmpty {
                 Divider()
                 Label("Further reading", systemImage: "books.vertical")
-                    .font(.system(size: 10, weight: .semibold))
+                    .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(.secondary)
                 ForEach(sources, id: \.url) { source in
                     Link(destination: URL(string: source.url) ?? URL(string: "https://")!) {
                         HStack(spacing: 4) {
                             Image(systemName: "arrow.up.right.square")
-                                .font(.system(size: 9))
+                                .font(.system(size: 10))
                             Text(source.label)
-                                .font(.system(size: 11))
+                                .font(.system(size: 13))
                                 .multilineTextAlignment(.leading)
                         }
                         .foregroundStyle(accent)
@@ -315,12 +315,12 @@ struct PerspectiveCard: View {
             Button { expanded.toggle() } label: {
                 HStack {
                     Text(perspective.label)
-                        .font(.system(size: 11, weight: .semibold))
+                        .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(accent)
                         .fixedSize(horizontal: false, vertical: true)
                     Spacer()
                     Image(systemName: expanded ? "chevron.up" : "chevron.down")
-                        .font(.system(size: 9))
+                        .font(.system(size: 10))
                         .foregroundStyle(.secondary)
                 }
             }
@@ -328,13 +328,13 @@ struct PerspectiveCard: View {
 
             if expanded {
                 Text(perspective.summary)
-                    .font(.system(size: 11))
+                    .font(.system(size: 12))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
 
                 if !perspective.thinkers.isEmpty {
                     Text("Key thinkers: " + perspective.thinkers.joined(separator: " · "))
-                        .font(.system(size: 10))
+                        .font(.system(size: 11))
                         .foregroundStyle(.tertiary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -343,9 +343,9 @@ struct PerspectiveCard: View {
                     Link(destination: URL(string: source.url) ?? URL(string: "https://")!) {
                         HStack(spacing: 4) {
                             Image(systemName: "arrow.up.right.square")
-                                .font(.system(size: 9))
-                            Text(source.label)
                                 .font(.system(size: 10))
+                            Text(source.label)
+                                .font(.system(size: 11))
                                 .multilineTextAlignment(.leading)
                         }
                         .foregroundStyle(accent.opacity(0.8))

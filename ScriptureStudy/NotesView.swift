@@ -1,10 +1,13 @@
 import SwiftUI
+#if os(macOS)
+import AppKit
+#endif
+
 struct NotesView: View {
 
     @EnvironmentObject var notesManager:     NotesManager
     @EnvironmentObject var myBible:          MyBibleService
     @EnvironmentObject var bookmarksManager: BookmarksManager
-    @EnvironmentObject var favourites:       FavouritesStore
 
     @AppStorage("fontSize") private var fontSize: Double = 16
     @AppStorage("fontName")      private var fontName:     String = ""
@@ -22,25 +25,35 @@ struct NotesView: View {
     @State private var saveTimer:    Timer?
     @State private var showingDelete = false
 
-    var body: some View {
-        #if os(macOS)
-        HSplitView {
-            sidebar
-                .frame(minWidth: 190, maxWidth: 240)
+    private var activeNotes: [Note] {
+        notesManager.notes.filter { !$0.isArchived && $0.deletedAt == nil }
+    }
 
-            if let note = notesManager.selectedNote {
-                editorPanel(note: note)
-            } else {
-                emptyState
+    var body: some View {
+        Group {
+            #if os(macOS)
+            HSplitView {
+                sidebar
+                    .frame(minWidth: 190, maxWidth: 240)
+
+                if let note = notesManager.selectedNote {
+                    editorPanel(note: note)
+                } else {
+                    emptyState
+                }
             }
+            #else
+            NavigationSplitView {
+                sidebar
+            } detail: {
+                if let note = notesManager.selectedNote { editorPanel(note: note) } else { emptyState }
+            }
+            #endif
         }
-        #else
-        NavigationSplitView {
-            sidebar
-        } detail: {
-            if let note = notesManager.selectedNote { editorPanel(note: note) } else { emptyState }
+        .onAppear { normalizeSelection() }
+        .onChange(of: notesManager.notes) { _, _ in
+            normalizeSelection()
         }
-        #endif
     }
 
     // MARK: - Sidebar
@@ -50,7 +63,7 @@ struct NotesView: View {
 
             // Header
             HStack {
-                Text("Organizer")
+                Text("Notes")
                     .font(.headline)
                 Spacer()
                 // iCloud sync indicator
@@ -89,112 +102,9 @@ struct NotesView: View {
 
             Divider()
 
-            // ── Favourite books picker ───────────────────────────
-            // Always visible so you can see the feature even before
-            // starring anything. Reading `favouritePaths` (rather than the
-            // computed `favouriteURLs`) ensures SwiftUI actually observes
-            // the @Published property and re-renders when it changes.
-            HStack(spacing: 6) {
-                Image(systemName: "star.fill")
-                    .font(.caption).foregroundStyle(filigreeAccent)
-                Text("FAVOURITES")
-                    .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                Spacer()
-                if favourites.favouritePaths.isEmpty {
-                    Text("none yet")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                        .italic()
-                } else {
-                    Menu {
-                        ForEach(favourites.favouritePaths, id: \.self) { path in
-                            let url = URL(fileURLWithPath: path)
-                            Button {
-                                openFavouriteBook(url)
-                            } label: {
-                                Text(favouriteDisplayName(url))
-                            }
-                        }
-                    } label: {
-                        HStack(spacing: 4) {
-                            Text("Pick a book (\(favourites.favouritePaths.count))")
-                                .font(.caption.weight(.medium))
-                                .foregroundStyle(.primary)
-                                .lineLimit(1)
-                            Image(systemName: "chevron.up.chevron.down")
-                                .font(.system(size: 8, weight: .semibold))
-                                .foregroundStyle(filigreeAccent)
-                        }
-                        .padding(.horizontal, 8).padding(.vertical, 4)
-                        .background(Color.primary.opacity(0.06))
-                        .clipShape(RoundedRectangle(cornerRadius: 6))
-                    }
-                    .menuStyle(.borderlessButton)
-                    .fixedSize()
-                }
-            }
-            .padding(.horizontal, 14).padding(.vertical, 6)
-            .background(filigreeAccent.opacity(0.04))
-
-            // ── Bookmarks section ─────────────────────────────────
-            if !bookmarksManager.bookmarks.isEmpty {
-                VStack(alignment: .leading, spacing: 0) {
-                    HStack {
-                        Image(systemName: "bookmark.fill")
-                            .font(.caption).foregroundStyle(filigreeAccent)
-                        Text("BOOKMARKS")
-                            .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                        Spacer()
-                    }
-                    .padding(.horizontal, 14).padding(.top, 10).padding(.bottom, 4)
-
-                    ForEach(bookmarksManager.bookmarks) { bookmark in
-                        HStack {
-                            VStack(alignment: .leading, spacing: 1) {
-                                Text(bookmark.displayTitle)
-                                    .font(.caption.weight(.medium))
-                                    .foregroundStyle(theme.text)
-                                Text(bookmark.formattedDate)
-                                    .font(.caption2).foregroundStyle(theme.secondary)
-                            }
-                            Spacer()
-                            Button {
-                                NotificationCenter.default.post(
-                                    name: .navigateToPassage,
-                                    object: nil,
-                                    userInfo: [
-                                        "bookNumber": bookmark.bookNumber,
-                                        "chapter":    bookmark.chapterNumber
-                                    ]
-                                )
-                            } label: {
-                                Image(systemName: "arrow.right.circle")
-                                    .font(.caption).foregroundStyle(filigreeAccent)
-                            }
-                            .buttonStyle(.plain)
-                            .help("Go to \(bookmark.displayTitle)")
-                        }
-                        .padding(.horizontal, 14).padding(.vertical, 4)
-                        .contextMenu {
-                            Button("Delete Bookmark", role: .destructive) {
-                                bookmarksManager.delete(bookmark)
-                            }
-                        }
-                    }
-                }
-                .background(filigreeAccent.opacity(0.04))
-
-                HStack {
-                    Text("NOTES")
-                        .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                    Spacer()
-                }
-                .padding(.horizontal, 14).padding(.top, 10).padding(.bottom, 4)
-            }
-
             Divider()
 
-            if notesManager.notes.isEmpty {
+            if activeNotes.isEmpty {
                 VStack(spacing: 8) {
                     Spacer()
                     Image(systemName: "note")
@@ -206,7 +116,7 @@ struct NotesView: View {
             } else {
                 ScrollView {
                     LazyVStack(spacing: 0) {
-                        ForEach(notesManager.notes) { note in
+                        ForEach(activeNotes) { note in
                             let isSelected = notesManager.selectedNote?.id == note.id
                             NoteRow(note: note)
                                 .padding(.horizontal, 10)
@@ -304,6 +214,19 @@ struct NotesView: View {
                         // Button — tap to jump to this passage in the Bible tab
                         Button {
                             myBible.navigate(to: note.verseReference)
+                            if note.bookNumber > 0,
+                               note.chapterNumber > 0,
+                               let verse = note.verseNumbers.first {
+                                NotificationCenter.default.post(
+                                    name: Notification.Name("showNotesForVerse"),
+                                    object: nil,
+                                    userInfo: [
+                                        "bookNumber": note.bookNumber,
+                                        "chapter": note.chapterNumber,
+                                        "verse": verse
+                                    ]
+                                )
+                            }
                         } label: {
                             HStack(spacing: 5) {
                                 Image(systemName: "book.fill")
@@ -345,7 +268,6 @@ struct NotesView: View {
                                 if let bn = myBibleBookNumbers.first(where: { $0.value == bookName })?.key {
                                     u.bookNumber    = bn
                                     u.chapterNumber = ch
-                                    u.verseNumbers  = []
                                 }
                             }
                             notesManager.save(u)
@@ -373,41 +295,28 @@ struct NotesView: View {
 
             Divider()
 
-            // ── Formatting toolbar ──
-            HStack(spacing: 4) {
-                Group {
-                    FormatButton(label: "B", help: "Bold (**text**)") { editorController.bold() }
-                    FormatButton(label: "I", help: "Italic (*text*)")  { editorController.italic() }
-                    FormatButton(label: "H", help: "Heading (# line)") { editorController.heading() }
-                    FormatButton(label: "•", help: "Bullet (- line)")  { editorController.bullet() }
-                }
-                Divider().frame(height: 16).padding(.horizontal, 4)
-                Text("Markdown").font(.caption2).foregroundStyle(.tertiary)
-                Spacer()
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 6)
-            .background(Color.platformWindowBg)
-
-            Divider()
-
-            // ── Text editor ──
-            NoteTextEditor(
-                noteID:      note.id,
-                initialText: note.content,
+            NoteEditorSurface(
+                noteID: note.id,
+                initialText: note.plainTextContent,
+                initialAttributedText: initialAttributedEditorText(for: note),
+                fontSize: fontSize,
+                fontName: fontName,
+                controller: editorController,
+                highlight: notesManager.searchHighlight,
+                isEditable: !note.isLocked,
                 onTextChange: { val in
                     guard !note.isLocked else { return }
                     notesManager.searchHighlight = ""
-                    var u = note; u.content = val
+                    var u = note
+                    u.content = val
                     scheduleSave(u)
                 },
-                fontSize:    fontSize,
-                fontName:    fontName,
-                controller:  editorController,
-                highlight:   notesManager.searchHighlight,
-                isEditable:  !note.isLocked
+                onAttributedTextChange: { attributedText in
+                    guard !note.isLocked else { return }
+                    notesManager.searchHighlight = ""
+                    scheduleSave(richNote(from: note, attributedText: attributedText))
+                }
             )
-            .id(note.id)
         }
         .confirmationDialog("Delete \"\(note.displayTitle)\"?",
                             isPresented: $showingDelete) {
@@ -444,10 +353,44 @@ struct NotesView: View {
     }
 
     private func scheduleSave(_ note: Note) {
+        notesManager.stage(note)
         saveTimer?.invalidate()
         saveTimer = Timer.scheduledTimer(withTimeInterval: 0.8, repeats: false) { _ in Task { @MainActor in self.notesManager.save(note) }
         }
     }
+
+    private func richDocument(for note: Note) -> RichNoteDocument {
+        note.richDocument ?? RichNoteBridge.document(fromPlainText: note.content)
+    }
+
+    private func richNote(from note: Note, attributedText: NSAttributedString) -> Note {
+        #if os(macOS)
+        let document = RichNoteEditorBridge.document(from: attributedText, baseFont: resolvedEditorFont())
+        var updated = note
+        updated.richDocument = document
+        updated.content = document.plainText
+        return updated
+        #else
+        return note
+        #endif
+    }
+
+    private func initialAttributedEditorText(for note: Note) -> NSAttributedString? {
+        #if os(macOS)
+        return RichNoteEditorBridge.attributedString(from: richDocument(for: note), baseFont: resolvedEditorFont())
+        #else
+        return nil
+        #endif
+    }
+
+    #if os(macOS)
+    private func resolvedEditorFont() -> NSFont {
+        if !fontName.isEmpty, let font = NSFont(name: fontName, size: fontSize) {
+            return font
+        }
+        return NSFont.systemFont(ofSize: fontSize)
+    }
+    #endif
 
     private func exportNote(_ note: Note) {
         guard let url = notesManager.exportURL(for: note) else { return }
@@ -466,33 +409,18 @@ struct NotesView: View {
         #endif
     }
 
-    // MARK: - Favourites helpers
-
-    /// Cleans up a book's file name into a human-readable label for the
-    /// picker menu: strips the extension, swaps underscores/hyphens for
-    /// spaces. Keeps the result short enough for a menu entry.
-    private func favouriteDisplayName(_ url: URL) -> String {
-        url.deletingPathExtension().lastPathComponent
-            .replacingOccurrences(of: "_", with: " ")
-            .replacingOccurrences(of: "-", with: " ")
-    }
-
-    /// Switches to the Books tab and asks it to open the given URL at
-    /// its saved reading position. Uses the existing tab-switch
-    /// notification plus a short delay so the Books tab's listener is
-    /// active when the open-book request arrives.
-    private func openFavouriteBook(_ url: URL) {
-        NotificationCenter.default.post(
-            name: Notification.Name("switchToLibraryTab"),
-            object: nil
-        )
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-            NotificationCenter.default.post(
-                name: Notification.Name("openBookByPath"),
-                object: nil,
-                userInfo: ["path": url.path]
-            )
+    private func normalizeSelection() {
+        guard !activeNotes.isEmpty else {
+            notesManager.selectedNote = nil
+            return
         }
+
+        if let selected = notesManager.selectedNote,
+           activeNotes.contains(where: { $0.id == selected.id }) {
+            return
+        }
+
+        notesManager.selectedNote = activeNotes.first
     }
 }
 
@@ -522,26 +450,5 @@ struct NoteRow: View {
             }
         }
         .padding(.vertical, 3)
-    }
-}
-
-// MARK: - Format Button
-
-struct FormatButton: View {
-    let label:  String
-    let help:   String
-    let action: () -> Void
-    var body: some View {
-        Button(action: action) {
-            Text(label)
-                .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                .frame(width: 26, height: 22)
-                .background(Color.platformWindowBg)
-                .clipShape(RoundedRectangle(cornerRadius: 4))
-                .overlay(RoundedRectangle(cornerRadius: 4)
-                    .stroke(Color.secondary.opacity(0.3), lineWidth: 0.5))
-        }
-        .buttonStyle(.plain)
-        .help(help)
     }
 }

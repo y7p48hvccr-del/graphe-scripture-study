@@ -147,9 +147,14 @@ struct DayPopoverView: View {
                               text: $newEventText)
                         .textFieldStyle(.plain)
                         .font(.system(size: 12))
+                        .foregroundStyle(.black)              // forces typed text to black
                         .padding(.horizontal, 8).padding(.vertical, 6)
-                        .background(Color(white: 0.94))
+                        .background(Color.white)              // forces background to white
                         .clipShape(RoundedRectangle(cornerRadius: 6))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 6)
+                                .stroke(Color(white: 0.8), lineWidth: 0.5)
+                        )
                         .onSubmit { addEvent() }
 
                     Button(action: addEvent) {

@@ -4,39 +4,64 @@ struct LaunchScreenView: View {
     @AppStorage("showLaunchAnimation") var showAnimation: Bool = true
     var onComplete: () -> Void
 
-    @State private var scale:   CGFloat = 0.3
-    @State private var opacity: Double  = 0.0
-    @State private var fadeScale: CGFloat = 1.0
+    @State private var animationTrigger = 0
 
     private let skyBlue = Color(red: 0.788, green: 0.843, blue: 0.894)
+    private let entryDuration = 2.35
+    private let holdDuration = 0.4
+    private let exitDuration = 2.1
+
+    private struct SplashAnimationValues {
+        var scale: CGFloat = 0.3
+        var opacity: Double = 0.0
+    }
 
     var body: some View {
-        ZStack {
-            skyBlue.ignoresSafeArea()
-            Image("GrapheOneLogo")
-                .resizable()
-                .scaledToFit()
-                .frame(width: 320, height: 320)
-                .scaleEffect(scale * fadeScale)
-                .opacity(opacity)
+        GeometryReader { proxy in
+            let baseSize = min(proxy.size.width, proxy.size.height) * 0.72
+
+            ZStack {
+                skyBlue.ignoresSafeArea()
+                Image("GrapheOneLogo")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: baseSize, height: baseSize)
+                    .keyframeAnimator(
+                        initialValue: SplashAnimationValues(),
+                        trigger: animationTrigger
+                    ) { content, value in
+                        content
+                            .scaleEffect(value.scale)
+                            .opacity(value.opacity)
+                    } keyframes: { _ in
+                        KeyframeTrack(\.scale) {
+                            CubicKeyframe(1.0, duration: entryDuration)
+                            LinearKeyframe(1.0, duration: holdDuration)
+                            CubicKeyframe(1.24, duration: exitDuration)
+                        }
+
+                        KeyframeTrack(\.opacity) {
+                            CubicKeyframe(1.0, duration: 1.6)
+                            LinearKeyframe(1.0, duration: entryDuration + holdDuration - 1.6)
+                            CubicKeyframe(0.0, duration: exitDuration)
+                        }
+                    }
+            }
         }
         .onAppear {
             guard showAnimation else { onComplete(); return }
-            runAnimation()
+            DispatchQueue.main.async {
+                runAnimation()
+            }
         }
     }
 
     private func runAnimation() {
-        withAnimation(.easeOut(duration: 1.8)) {
-            scale   = 1.0
-            opacity = 1.0
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.2) {
-            withAnimation(.easeOut(duration: 1.8)) {
-                opacity   = 0.0
-                fadeScale = 1.5
-            }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.85) { onComplete() }
+        animationTrigger += 1
+
+        let totalDuration = entryDuration + holdDuration + exitDuration
+        DispatchQueue.main.asyncAfter(deadline: .now() + totalDuration + 0.05) {
+            onComplete()
         }
     }
 }

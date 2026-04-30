@@ -100,6 +100,7 @@ struct LocalBibleView: View {
     var body: some View {
         readingColumn
         .onAppear {
+            guard !AppRuntimeContext.isRunningTests else { return }
             print("[STARTUP] LocalBibleView.onAppear")
             // Beachball fix 2026-04-21: the Bible tab reconstructs on
             // every tab switch back. Skip the expensive chapter/book
@@ -155,11 +156,10 @@ struct LocalBibleView: View {
             )
         }
         .onReceive(NotificationCenter.default.publisher(for: .navigateToPassage)) { note in
-            guard let bn = note.userInfo?["bookNumber"] as? Int,
-                  let ch = note.userInfo?["chapter"]    as? Int else { return }
+            guard let request = PassageNavigationRequest(userInfo: note.userInfo) else { return }
 
             // Switch to the requested Bible module if specified
-            if let moduleName = note.userInfo?["moduleName"] as? String {
+            if let moduleName = request.moduleName {
                 let match = myBible.modules.first(where: {
                     $0.type == .bible && $0.name == moduleName
                 })
@@ -177,21 +177,16 @@ struct LocalBibleView: View {
             isNavigatingToPassage = true
 
             // Navigate to book/chapter
-            selectedBookNumber = bn
-            selectedChapter    = ch
+            selectedBookNumber = request.bookNumber
+            selectedChapter    = request.chapter
             updateChapterCount()
 
             // Highlight the specific verse if provided
-            let targetVerse = note.userInfo?["verse"] as? Int ?? 0
+            let targetVerse = request.verse ?? 0
             Task {
                 await loadChapter()
                 if targetVerse > 0 {
                     selectedVerse = targetVerse
-                    NotificationCenter.default.post(
-                        name: Notification.Name("verseSelected"),
-                        object: nil,
-                        userInfo: ["bookNumber": bn, "chapter": ch, "verse": targetVerse])
-
                 }
                 isNavigatingToPassage = false
             }
@@ -216,10 +211,79 @@ struct LocalBibleView: View {
         .background(theme.background)
     }
 
+    private var shouldShowActiveBookHeader: Bool {
+        myBible.selectedBible != nil &&
+        !myBible.isLoading &&
+        myBible.errorMessage == nil &&
+        !myBible.verses.isEmpty
+    }
+
+    private var activeBookHeader: some View {
+        HStack(spacing: 8) {
+            decorativeRule(width: 18)
+            Image(systemName: "book.closed")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(filigreeAccent.opacity(0.85))
+            VStack(spacing: 1) {
+                Text(selectedBookName)
+                    .font(.system(size: 20, weight: .semibold, design: .serif))
+                    .foregroundStyle(theme.text)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+
+                Text("Chapter \(selectedChapter)")
+                    .font(.system(size: 9, weight: .semibold))
+                    .tracking(1.4)
+                    .textCase(.uppercase)
+                    .foregroundStyle(filigreeAccent.opacity(0.9))
+            }
+            decorativeRule(width: 18)
+        }
+        .fixedSize(horizontal: true, vertical: false)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(
+            Capsule()
+                .fill(filigreeAccent.opacity(0.08))
+        )
+        .overlay(
+            Capsule()
+                .stroke(filigreeAccent.opacity(0.18), lineWidth: 1)
+        )
+    }
+
+    private func decorativeRule(width: CGFloat = 120) -> some View {
+        Rectangle()
+            .fill(
+                LinearGradient(
+                    colors: [
+                        Color.clear,
+                        filigreeAccent.opacity(0.35),
+                        filigreeAccent.opacity(0.7),
+                        filigreeAccent.opacity(0.35),
+                        Color.clear
+                    ],
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+            )
+            .frame(width: width, height: 1)
+            .overlay {
+                Rectangle()
+                    .fill(filigreeAccent.opacity(0.12))
+                    .frame(width: width, height: 5)
+                    .blur(radius: 4)
+            }
+    }
+
     // MARK: - Picker bar (above Bible text)
 
     private var pickerBar: some View {
         HStack(spacing: 12) {
+            if shouldShowActiveBookHeader {
+                activeBookHeader
+            }
+
             // Bible picker — custom fixed-width button with popover list
             BiblePickerButton(
                 modules: myBible.visibleModules.filter {
@@ -594,15 +658,11 @@ struct LocalBibleView: View {
     // MARK: - Actions
 
     private func createNoteForVerse(_ verseNum: Int) {
-        print("[NOTE DEBUG] createNoteForVerse called: book=\(selectedBookNumber) ch=\(selectedChapter) v=\(verseNum)")
         let note = notesManager.createNote(
             bookNumber: selectedBookNumber,
             chapter:    selectedChapter,
             verses:     [verseNum]
         )
-        print("[NOTE DEBUG] createNote returned note id=\(note.id) verseRef=\(note.verseReference)")
-        print("[NOTE DEBUG] notesManager.notes.count after create = \(notesManager.notes.count)")
-        print("[NOTE DEBUG] posting openNoteInCompanion for note \(note.id)")
         NotificationCenter.default.post(
             name: Notification.Name("openNoteInCompanion"),
             object: nil,

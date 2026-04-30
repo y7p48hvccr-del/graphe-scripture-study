@@ -28,6 +28,15 @@ struct NoteCommands: Commands {
             }
             .keyboardShortcut("i", modifiers: .command)
 
+            Button("Underline") {
+                NoteCommandRouter.shared.underline()
+            }
+            .keyboardShortcut("u", modifiers: .command)
+
+            Button("Highlight") {
+                NoteCommandRouter.shared.highlight()
+            }
+
             Divider()
 
             Button("Heading") {
@@ -39,6 +48,11 @@ struct NoteCommands: Commands {
                 NoteCommandRouter.shared.bullet()
             }
             .keyboardShortcut("l", modifiers: [.command, .shift])
+
+            Button("Numbered List") {
+                NoteCommandRouter.shared.numberedList()
+            }
+            .keyboardShortcut("n", modifiers: [.command, .shift])
 
             Divider()
 
@@ -67,8 +81,11 @@ class NoteCommandRouter {
 
     func bold()             { activeController?.bold()           }
     func italic()           { activeController?.italic()         }
+    func underline()        { activeController?.underline()      }
+    func highlight()        { activeController?.highlight()      }
     func heading()          { activeController?.heading()        }
     func bullet()           { activeController?.bullet()         }
+    func numberedList()     { activeController?.numberedList()   }
     func increaseFontSize() { activeController?.changeFontSize(by:  1) }
     func decreaseFontSize() { activeController?.changeFontSize(by: -1) }
 }

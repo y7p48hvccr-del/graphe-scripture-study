@@ -3,8 +3,8 @@ import SwiftUI
 struct ContentView: View {
     @EnvironmentObject var ollama:        OllamaService
     @EnvironmentObject var notesManager:  NotesManager
-    @StateObject private var bmapsService       = BMapsService()
-    @StateObject private var interlinearService = InterlinearService()
+    @EnvironmentObject var bmapsService:       BMapsService
+    @EnvironmentObject var interlinearService: InterlinearService
 
     @AppStorage("themeID")           private var themeID:           String = "light"
     @AppStorage("filigreeOn")        private var filigreeOn:        Bool   = true
@@ -39,8 +39,10 @@ struct ContentView: View {
                         .tabItem { Label("Chat",        systemImage: "bubble.left.and.bubble.right.fill") }.tag(10)
                     ZStack { Color.white; DevotionalView() }
                         .tabItem { Label("Time Alone",  systemImage: "book.closed.fill") }.tag(8)
+                    ZStack { NotesView() }
+                        .tabItem { Label("Notes",       systemImage: "note.text") }.tag(4)
                     ZStack { OrganizerView() }
-                        .tabItem { Label("Organizer",   systemImage: "calendar") }.tag(4)
+                        .tabItem { Label("Organizer",   systemImage: "calendar") }.tag(11)
                     ZStack { Color.white; SearchView() }
                         .tabItem { Label("Search",      systemImage: "magnifyingglass") }.tag(5)
                     ZStack { ModuleLibraryView() }
@@ -70,13 +72,37 @@ struct ContentView: View {
                         }
                     }
                 }
+                .onReceive(NotificationCenter.default.publisher(for: Notification.Name("showNotesForVerse"))) { note in
+                    // Preserve verse-note context when a note reference is
+                    // opened from another tab. CompanionPanel only receives
+                    // this after the Bible tab is active.
+                    let info = note.userInfo
+                    if selectedTab != 0 {
+                        selectedTab = 0
+                        if info != nil {
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                                NotificationCenter.default.post(
+                                    name: Notification.Name("showNotesForVerse"),
+                                    object: nil,
+                                    userInfo: info)
+                            }
+                        }
+                    }
+                }
                 .onReceive(NotificationCenter.default.publisher(for: .navigateToCommentary)) { _ in selectedTab = 1
                 }
                 .onChange(of: selectedTab) { _, newTab in
-                    // Auto-delete empty note when navigating away from Organizer tab
+                    // Auto-delete empty note when navigating away from Notes tab
                     if newTab != 4, let note = notesManager.selectedNote {
                         notesManager.deleteIfEmpty(note)
                     }
+                }
+                .onReceive(NotificationCenter.default.publisher(for: .navigateToNote)) { note in
+                    guard let id = note.userInfo?["noteID"] as? UUID else { return }
+                    notesManager.selectedNote = notesManager.notes.first(where: { $0.id == id })
+                }
+                .onReceive(NotificationCenter.default.publisher(for: Notification.Name("switchToBibleTab"))) { _ in
+                    selectedTab = 0
                 }
                 .onReceive(NotificationCenter.default.publisher(for: Notification.Name("switchToNotesTab"))) { _ in selectedTab = 4
                 }
@@ -86,6 +112,7 @@ struct ContentView: View {
                 }
                 .onAppear {
                     selectedTab = 0  // Always open on Bible tab
+                    guard !AppRuntimeContext.isRunningTests else { return }
                     #if os(macOS)
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { applyWindowBackground() }
                     #endif
@@ -101,8 +128,6 @@ struct ContentView: View {
             }
         }
         .tint(filigreeAccent)
-        .environmentObject(bmapsService)
-        .environmentObject(interlinearService)
         .background(theme.background.ignoresSafeArea())
         .sheet(isPresented: $showingOnboarding) {
             OnboardingView(

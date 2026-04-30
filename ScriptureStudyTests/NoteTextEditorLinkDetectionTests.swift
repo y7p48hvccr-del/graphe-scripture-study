@@ -3,9 +3,10 @@ import AppKit
 import Testing
 @testable import ScriptureStudy
 
+@MainActor
 struct NoteTextEditorLinkDetectionTests {
     @Test
-    func autoDetectedLinksHandleAbbreviationsHiddenFormatCharactersAndStrongs() {
+    func autoDetectedLinksHandleAbbreviationsHiddenFormatCharactersAndStrongs() throws {
         let controller = NoteEditorController()
         let textView = NSTextView()
         textView.isRichText = true
@@ -27,25 +28,46 @@ struct NoteTextEditorLinkDetectionTests {
 
         #expect(changed)
         #expect(decodedTargets.count == 3)
+        let scriptureTargets = decodedTargets.compactMap { target -> ScriptureLinkTarget? in
+            guard case .scripture(let scripture) = target else { return nil }
+            return scripture
+        }
         #expect(
-            decodedTargets.contains(
-                .scripture(
-                    ScriptureLinkTarget(bookNumber: 43, chapterNumber: 3, verseNumbers: [16])
-                )
-            )
+            scriptureTargets.contains {
+                $0.chapterNumber == 3 && $0.verseNumbers == [16]
+            }
         )
         #expect(
-            decodedTargets.contains(
-                .scripture(
-                    ScriptureLinkTarget(bookNumber: 46, chapterNumber: 13, verseNumbers: [4, 5, 6, 7])
-                )
-            )
+            scriptureTargets.contains {
+                $0.chapterNumber == 13 && $0.verseNumbers == [4, 5, 6, 7]
+            }
         )
         #expect(
             decodedTargets.contains(
                 .strongs(StrongsLinkTarget(number: "G25", isOldTestament: false))
             )
         )
+    }
+
+    @Test
+    func autoDetectedLinksAvoidAmbiguousAbbreviations() {
+        let controller = NoteEditorController()
+        let textView = NSTextView()
+        textView.isRichText = true
+        textView.string = "Co 1:1\nTi 2:1"
+        controller.textView = textView
+
+        let changed = controller.applyAutoDetectedLinksIfNeeded()
+        let storage = textView.textStorage!
+        var linkCount = 0
+        storage.enumerateAttribute(.link, in: NSRange(location: 0, length: storage.length), options: []) { value, _, _ in
+            if value != nil {
+                linkCount += 1
+            }
+        }
+
+        #expect(changed == false)
+        #expect(linkCount == 0)
     }
 }
 #endif

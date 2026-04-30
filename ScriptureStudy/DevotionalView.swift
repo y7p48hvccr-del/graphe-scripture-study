@@ -50,7 +50,7 @@ struct DevotionalView: View {
                 Image(systemName: "book.closed.fill")
                     .font(.system(size: 11))
                     .foregroundStyle(filigreeAccent)
-                Text("TIME ALONE")
+                Text("DEVOTIONAL")
                     .font(.caption.weight(.bold))
                     .foregroundStyle(filigreeAccent)
                     .tracking(1.2)
@@ -213,6 +213,7 @@ struct DevotionalContentView: View {
     let filigreeAccent: Color
     let fontSize:       Double
     let fontName:       String
+    @State private var selectedVerseTarget: VerseLinkTarget? = nil
 
     var body: some View {
         ScrollView {
@@ -230,13 +231,27 @@ struct DevotionalContentView: View {
                     theme:      theme,
                     fontSize:   fontSize,
                     fontName:   fontName,
-                    accentHex:  filigreeAccent.toHex()
+                    accentHex:  filigreeAccent.toHex(),
+                    onVerseTap: { target in
+                        selectedVerseTarget = target
+                    }
                 )
                 .frame(minHeight: 2000)
             }
             .padding(24)
         }
         .background(theme.background)
+        .popover(item: $selectedVerseTarget, arrowEdge: .bottom) { target in
+            VersePreviewPopover(
+                bookNumber: target.bookNumber,
+                chapter: target.chapter,
+                verseStart: target.verseStart,
+                verseEnd: target.verseEnd,
+                accent: filigreeAccent,
+                onOpenInBible: nil
+            )
+            .frame(width: 320)
+        }
     }
 
     private var titleFont: Font {
@@ -257,10 +272,12 @@ struct DevotionalWebView: WKViewRepresentable {
     let fontSize:   Double
     let fontName:   String
     let accentHex:  String
+    var onVerseTap: ((VerseLinkTarget) -> Void)? = nil
 
     #if os(macOS)
     func makeNSView(context: Context) -> WKWebView { makeWebView(context: context) }
     func updateNSView(_ webView: WKWebView, context: Context) {
+        context.coordinator.onVerseTap = onVerseTap
         if context.coordinator.lastHTML != html {
             context.coordinator.lastHTML = html
             load(in: webView)
@@ -269,6 +286,7 @@ struct DevotionalWebView: WKViewRepresentable {
     #else
     func makeUIView(context: Context) -> WKWebView { makeWebView(context: context) }
     func updateUIView(_ webView: WKWebView, context: Context) {
+        context.coordinator.onVerseTap = onVerseTap
         if context.coordinator.lastHTML != html {
             context.coordinator.lastHTML = html
             load(in: webView)
@@ -321,10 +339,15 @@ struct DevotionalWebView: WKViewRepresentable {
         webView.loadHTMLString(page, baseURL: nil)
     }
 
-    func makeCoordinator() -> Coordinator { Coordinator() }
+    func makeCoordinator() -> Coordinator { Coordinator(onVerseTap: onVerseTap) }
 
     class Coordinator: NSObject, WKNavigationDelegate {
         var lastHTML: String = ""
+        var onVerseTap: ((VerseLinkTarget) -> Void)?
+
+        init(onVerseTap: ((VerseLinkTarget) -> Void)? = nil) {
+            self.onVerseTap = onVerseTap
+        }
 
         func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction,
                      decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
@@ -333,20 +356,19 @@ struct DevotionalWebView: WKViewRepresentable {
             if href.hasPrefix("about:") || href.isEmpty {
                 decisionHandler(.allow); return
             }
-            parseBibleLink(href)
+            handleBibleLink(href)
             decisionHandler(.cancel)
         }
 
         /// Hrefs in the devotional HTML use a URL-encoded MyBible "B:" format,
         /// e.g. `b:540%208:1-24`. We lowercase-tolerate, decode the %20 space,
         /// and accept an optional verse with an optional range suffix.
-        /// The Bible tab opens at the start verse of the reference.
-        private func parseBibleLink(_ href: String) {
+        private func handleBibleLink(_ href: String) {
             let normalised = href
                 .replacingOccurrences(of: "%20", with: " ")
                 .replacingOccurrences(of: "%3A", with: ":")
             let pattern = try? NSRegularExpression(
-                pattern: #"[bB]:\s*(\d+)\s+(\d+)(?::(\d+))?"#
+                pattern: #"[bB]:\s*(\d+)\s+(\d+)(?::(\d+)(?:[-–](\d+))?)?"#
             )
             let ns = normalised as NSString
             guard let m = pattern?.firstMatch(in: normalised,
@@ -354,21 +376,26 @@ struct DevotionalWebView: WKViewRepresentable {
             else { return }
             let book = Int(ns.substring(with: m.range(at: 1))) ?? 0
             let ch   = Int(ns.substring(with: m.range(at: 2))) ?? 1
-            let vs: Int
+            let verseStart: Int
             if m.range(at: 3).location != NSNotFound {
-                vs = Int(ns.substring(with: m.range(at: 3))) ?? 1
+                verseStart = Int(ns.substring(with: m.range(at: 3))) ?? 1
             } else {
-                vs = 1
+                verseStart = 1
+            }
+            let verseEnd: Int
+            if m.range(at: 4).location != NSNotFound {
+                verseEnd = Int(ns.substring(with: m.range(at: 4))) ?? verseStart
+            } else {
+                verseEnd = verseStart
             }
             DispatchQueue.main.async {
-                NotificationCenter.default.post(
-                    name: .navigateToPassage,
-                    object: nil,
-                    userInfo: [
-                        "bookNumber": book,
-                        "chapter":    ch,
-                        "verse":      vs
-                    ]
+                self.onVerseTap?(
+                    VerseLinkTarget(
+                        bookNumber: book,
+                        chapter: ch,
+                        verseStart: verseStart,
+                        verseEnd: verseEnd
+                    )
                 )
             }
         }

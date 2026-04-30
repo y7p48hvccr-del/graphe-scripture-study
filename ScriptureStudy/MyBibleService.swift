@@ -2,6 +2,19 @@ import Foundation
 import SQLite3
 import CommonCrypto
 
+enum AppRuntimeContext {
+    static var isRunningTests: Bool {
+        ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+    }
+
+    static var testNotesDirectory: URL {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ScriptureStudyTestHostNotes", isDirectory: true)
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        return directory
+    }
+}
+
 // MARK: - Graphē encryption key & decryption helper
 
 private let grapheKey: [UInt8] = [
@@ -191,6 +204,8 @@ let myBibleBookOrder: [Int] = myBibleBookNumbers.keys.sorted()
 
 @MainActor
 class MyBibleService: ObservableObject {
+    private static let bundledStrongsResourceName = "Merged_Strongs_Dictionary"
+    private static let bundledStrongsResourceExtension = "SQLite3"
 
     @Published var modules:          [MyBibleModule] = []
     @Published var selectedLanguageFilter: String = UserDefaults.standard.string(forKey: "defaultLanguage") ?? "all" {
@@ -228,6 +243,7 @@ class MyBibleService: ObservableObject {
     @Published var modulesFolder:    String = "" {
         didSet {
             UserDefaults.standard.set(modulesFolder, forKey: "modulesFolder")
+            guard !AppRuntimeContext.isRunningTests else { return }
             startFolderAccess()
             Task { await scanModules() }
         }
@@ -255,6 +271,7 @@ class MyBibleService: ObservableObject {
         if let paths = UserDefaults.standard.array(forKey: "hiddenModules") as? [String] {
             hiddenModules = Set(paths)
         }
+        guard !AppRuntimeContext.isRunningTests else { return }
         // Start folder access immediately so module reads work from the first launch
         startFolderAccess()
         if !modulesFolder.isEmpty {
@@ -279,6 +296,30 @@ class MyBibleService: ObservableObject {
 
     var visibleModules: [MyBibleModule] {
         modules.filter { !hiddenModules.contains($0.filePath) }
+    }
+
+    private var bundledCanonicalStrongsPath: String? {
+        Bundle.main.path(
+            forResource: Self.bundledStrongsResourceName,
+            ofType: Self.bundledStrongsResourceExtension
+        )
+    }
+
+    private func bundledCanonicalStrongsModule() async -> (module: MyBibleModule, metaBlob: String)? {
+        guard let path = bundledCanonicalStrongsPath,
+              let (module, metaBlob, _) = await inspectModuleWithBlob(at: path)
+        else { return nil }
+
+        return (
+            MyBibleModule(
+                name: module.name,
+                description: module.description,
+                language: module.language,
+                type: .strongs,
+                filePath: module.filePath
+            ),
+            metaBlob
+        )
     }
 
     // MARK: - Module metadata cache
@@ -442,6 +483,13 @@ class MyBibleService: ObservableObject {
             }
         }
 
+        if let bundled = await bundledCanonicalStrongsModule() {
+            found.removeAll { $0.filePath == bundled.module.filePath }
+            found.append(bundled.module)
+            cachedBlobs[bundled.module.filePath] = bundled.metaBlob
+            hiddenModules.insert(bundled.module.filePath)
+        }
+
         // Save updated cache
         if cacheUpdated { saveCache(cache) }
 
@@ -475,7 +523,10 @@ class MyBibleService: ObservableObject {
         } else if selectedBible == nil {
             selectedBible = modules.first(where: { $0.type == .bible })
         }
-        if !sPath.isEmpty, let m = modules.first(where: { $0.filePath == sPath }) {
+        if let bundledPath = bundledCanonicalStrongsPath,
+           let bundled = modules.first(where: { $0.filePath == bundledPath }) {
+            selectedStrongs = bundled
+        } else if !sPath.isEmpty, let m = modules.first(where: { $0.filePath == sPath }) {
             selectedStrongs = m
         } else if selectedStrongs == nil {
             selectedStrongs = modules.first(where: { $0.type == .strongs })
@@ -799,7 +850,7 @@ class MyBibleService: ObservableObject {
             while sqlite3_step(stmt) == SQLITE_ROW {
                 let topic = sqlite3_column_text(stmt, 0).map { String(cString: $0) } ?? ""
                 let def   = self.col(stmt, 1, path: module.filePath) ?? ""
-                results.append(DictionaryEntry(topic: topic, definition: stripTags(def)))
+                results.append(DictionaryEntry(topic: topic, definition: def))
             }
             sqlite3_finalize(stmt)
             dictionaryEntries = results
@@ -935,23 +986,12 @@ class MyBibleService: ObservableObject {
         guard sqlite3_open_v2(module.filePath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else { return nil }
         defer { sqlite3_close(db) }
 
-        let digits    = String(number.drop(while: { !$0.isNumber }))
-        let prefix    = number.first.map(String.init) ?? ""
-        let hasPrefix = prefix == "G" || prefix == "H"
-        var keys      = [number, digits]
-        if !hasPrefix {
-            // No prefix — use book context to prefer Hebrew (OT) or Greek (NT)
-            if isOldTestament {
-                keys += ["H" + digits, "G" + digits]
-            } else {
-                keys += ["G" + digits, "H" + digits]
-            }
-        }
+        let keys = Self.strongsLookupKeys(for: number, isOldTestament: isOldTestament)
 
-        var foundRow: (String, String, String, String, String, String)?
+        var foundRow: (String, String, String, String, String, String, String, String)?
 
         for key in keys {
-            let sql = "SELECT topic, lexeme, transliteration, pronunciation, short_definition, definition FROM dictionary WHERE topic = ? LIMIT 1"
+            let sql = "SELECT topic, lexeme, transliteration, pronunciation, short_definition, definition, COALESCE(expanded_definition, ''), COALESCE(source_flags, 'strong') FROM dictionary WHERE topic = ? LIMIT 1"
             if let stmt = query(db: db, sql: sql) {
                 sqlite3_bind_text(stmt, 1, (key as NSString).utf8String, -1, nil)
                 if sqlite3_step(stmt) == SQLITE_ROW {
@@ -961,22 +1001,24 @@ class MyBibleService: ObservableObject {
                     let pr = sqlite3_column_text(stmt, 3).map { String(cString: $0) } ?? ""
                     let sd = sqlite3_column_text(stmt, 4).map { String(cString: $0) } ?? ""
                     let df = self.col(stmt, 5, path: module.filePath) ?? ""
+                    let ed = self.col(stmt, 6, path: module.filePath) ?? ""
+                    let sf = sqlite3_column_text(stmt, 7).map { String(cString: $0) } ?? "strong"
                     sqlite3_finalize(stmt)
-                    foundRow = (t, l, tr, pr, sd, df)
+                    foundRow = (t, l, tr, pr, sd, df, ed, sf)
                     break
                 }
                 sqlite3_finalize(stmt)
             }
         }
 
-        guard let (topic, lexeme, translit, pronunc, shortDef, rawDef) = foundRow else { return nil }
+        guard let (topic, lexeme, translit, pronunc, shortDef, rawDef, expandedDef, sourceFlags) = foundRow else { return nil }
 
         let body  = parseDefinitionBody(rawDef)
 
         // Try labelled extraction first (ETCBC+ format has explicit Bold labels)
         var derivation = extractLabel(body, label: "Derivation")
         var kjv        = extractLabel(body, label: "KJV")
-        let strongs    = extractLabel(body, label: "Strong\'s")
+        let strongs    = extractLabel(body, label: "Strong's")
 
         // If labelled extraction found nothing, fall back to ": - " split (standard Strong's format)
         if derivation.isEmpty && kjv.isEmpty && strongs.isEmpty {
@@ -1019,8 +1061,57 @@ class MyBibleService: ObservableObject {
             kjv:               kjv,
             references:        references,
             cognates:          cognates,
+            expandedDefinition: expandedDef,
+            sourceFlags:        sourceFlags,
             rawDefinition:     rawDef
         )
+    }
+
+    private nonisolated static func strongsLookupKeys(for rawNumber: String, isOldTestament: Bool) -> [String] {
+        let trimmed = rawNumber.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return [] }
+
+        let uppercased = trimmed.uppercased()
+        let firstCharacter = uppercased.first
+        let hasPrefix = firstCharacter == "G" || firstCharacter == "H"
+        let prefix = hasPrefix ? String(firstCharacter!) : nil
+        let body = hasPrefix ? String(uppercased.dropFirst()) : uppercased
+        let digits = String(body.prefix { $0.isNumber })
+        let suffix = String(body.dropFirst(digits.count))
+
+        func canonicalDigits(_ digits: String) -> String {
+            let trimmedDigits = String(digits.drop { $0 == "0" })
+            return trimmedDigits.isEmpty ? "0" : trimmedDigits
+        }
+
+        var keys: [String] = []
+
+        func appendUnique(_ key: String?) {
+            guard let key, !key.isEmpty, !keys.contains(key) else { return }
+            keys.append(key)
+        }
+
+        if hasPrefix {
+            appendUnique(uppercased)
+            if !digits.isEmpty {
+                appendUnique("\(prefix!)\(canonicalDigits(digits))\(suffix)")
+                appendUnique("\(digits)\(suffix)")
+                appendUnique("\(canonicalDigits(digits))\(suffix)")
+            }
+        } else {
+            appendUnique(uppercased)
+            guard !digits.isEmpty else { return keys }
+            let canonical = "\(canonicalDigits(digits))\(suffix)"
+            let preferredPrefix = isOldTestament ? "H" : "G"
+            let fallbackPrefix = isOldTestament ? "G" : "H"
+            appendUnique("\(preferredPrefix)\(canonical)")
+            appendUnique("\(fallbackPrefix)\(canonical)")
+            appendUnique(canonical)
+            appendUnique("\(preferredPrefix)\(digits)\(suffix)")
+            appendUnique("\(fallbackPrefix)\(digits)\(suffix)")
+        }
+
+        return keys
     }
 
     /// Parse the raw HTML definition into (derivation, kjv) strings.
@@ -1081,7 +1172,7 @@ class MyBibleService: ObservableObject {
         guard let start = body.range(of: search) else { return "" }
         let contentStart = start.upperBound
         // Find where next label begins
-        let knownLabels = ["Derivation: ", "Strong\'s: ", "KJV: ", "Usage: ", "See: "]
+        let knownLabels = ["Derivation: ", "Strong's: ", "KJV: ", "Usage: ", "See: "]
         var contentEnd = body.endIndex
         for next in knownLabels where next != search {
             if let r = body.range(of: next, range: contentStart..<body.endIndex) {
@@ -1129,18 +1220,22 @@ class MyBibleService: ObservableObject {
     // MARK: - Navigate to a passage from a reference string e.g. "Genesis 1" or "Genesis 1:3"
 
     func navigate(to reference: String) {
-        let withoutVerse = reference.components(separatedBy: ":").first ?? reference
-        let parts        = withoutVerse.trimmingCharacters(in: .whitespaces)
-                                       .components(separatedBy: " ")
+        let trimmedReference = reference.trimmingCharacters(in: .whitespacesAndNewlines)
+        let split = trimmedReference.split(separator: ":", maxSplits: 1, omittingEmptySubsequences: true)
+        let chapterPart = String(split.first ?? "")
+        let verse = split.count > 1 ? Int(split[1].split(separator: ",").first ?? "") : nil
+
+        let parts = chapterPart.components(separatedBy: " ")
         guard let chapterStr = parts.last,
               let chapter    = Int(chapterStr) else { return }
         let bookName = parts.dropLast().joined(separator: " ")
         guard let bookNum = myBibleBookNumbers
                 .first(where: { $0.value == bookName })?.key else { return }
-        NotificationCenter.default.post(
-            name: .navigateToPassage, object: nil,
-            userInfo: ["bookNumber": bookNum, "chapter": chapter]
-        )
+        var userInfo: [String: Any] = ["bookNumber": bookNum, "chapter": chapter]
+        if let verse {
+            userInfo["verse"] = verse
+        }
+        NotificationCenter.default.post(name: .navigateToPassage, object: nil, userInfo: userInfo)
     }
 
     func navigate(toBook bookNumber: Int, chapter: Int) {

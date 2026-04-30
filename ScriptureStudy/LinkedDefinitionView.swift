@@ -1,11 +1,21 @@
 import SwiftUI
+import WebKit
 
 // MARK: - Parsed segment types
 
 enum DefinitionSegment {
     case text(String)
-    case verseLink(label: String, bookNumber: Int, chapter: Int, verse: Int)
+    case verseLink(label: String, bookNumber: Int, chapter: Int, verseStart: Int, verseEnd: Int)
     case strongsLink(label: String, number: String)
+}
+
+struct VerseLinkTarget: Identifiable, Equatable {
+    let bookNumber: Int
+    let chapter: Int
+    let verseStart: Int
+    let verseEnd: Int
+
+    var id: String { "\(bookNumber)-\(chapter)-\(verseStart)-\(verseEnd)" }
 }
 
 // MARK: - HTML parser
@@ -16,7 +26,7 @@ struct DefinitionParser {
     /// MyBible uses the same numbering so we pass through directly
     static func parse(_ html: String) -> [DefinitionSegment] {
         var segments: [DefinitionSegment] = []
-        var remaining = html
+        var remaining = normaliseLexiconHTML(html)
 
         // Strip outer tags we don't need: <b>, <i>, </b>, </i>, <p/>, <br/>
         // We'll handle these by keeping their text content
@@ -53,7 +63,7 @@ struct DefinitionParser {
 
             // Find </a>
             guard let closeTag = remaining.range(of: "</a>") else { break }
-            let linkLabel = String(remaining[remaining.startIndex..<closeTag.lowerBound])
+            let linkLabel = cleanDisplayText(String(remaining[remaining.startIndex..<closeTag.lowerBound]))
             remaining = String(remaining[closeTag.upperBound...])
 
             // Parse href
@@ -65,13 +75,16 @@ struct DefinitionParser {
                    let bookNum = Int(parts[0]) {
                     let cvParts = parts[1].components(separatedBy: ":")
                     if cvParts.count == 2,
-                       let chapter = Int(cvParts[0]),
-                       let verse   = Int(cvParts[1]) {
+                       let chapter = Int(cvParts[0]) {
+                        let verseParts = cvParts[1].components(separatedBy: CharacterSet(charactersIn: "-–"))
+                        guard let verseStart = Int(verseParts[0]) else { continue }
+                        let verseEnd = verseParts.count > 1 ? (Int(verseParts[1]) ?? verseStart) : verseStart
                         segments.append(.verseLink(
                             label: linkLabel,
                             bookNumber: bookNum,
                             chapter: chapter,
-                            verse: verse
+                            verseStart: verseStart,
+                            verseEnd: verseEnd
                         ))
                         continue
                     }
@@ -84,18 +97,34 @@ struct DefinitionParser {
             }
 
             // Unrecognised href — just show as text
-            segments.append(.text(linkLabel))
+            if !linkLabel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                segments.append(.text(linkLabel))
+            }
         }
 
         return mergeAdjacentText(segments)
     }
 
-    private static func stripBasicTags(_ input: String) -> String {
+    private static func cleanDisplayText(_ input: String) -> String {
+        decodeHTMLEntities(stripBasicTags(input))
+    }
+
+    private static func normaliseLexiconHTML(_ input: String) -> String {
         var s = input
+        s = s.replacingOccurrences(of: "<hr>", with: "\n\n")
+        s = s.replacingOccurrences(of: "<hr/>", with: "\n\n")
+        s = s.replacingOccurrences(of: "<hr />", with: "\n\n")
         // Replace <p/> and <br/> with newline
         s = s.replacingOccurrences(of: "<p/>", with: "\n")
         s = s.replacingOccurrences(of: "<br/>", with: "\n")
         s = s.replacingOccurrences(of: "<br>", with: "\n")
+        s = s.replacingOccurrences(of: "</p>", with: "\n")
+        s = s.replacingOccurrences(of: "<p>", with: "")
+        return s
+    }
+
+    private static func stripBasicTags(_ input: String) -> String {
+        var s = input
         // Strip remaining tags
         while let open = s.range(of: "<"),
               let close = s.range(of: ">", range: open.upperBound..<s.endIndex) {
@@ -106,6 +135,43 @@ struct DefinitionParser {
             s = s.replacingOccurrences(of: "\n\n\n", with: "\n\n")
         }
         return s
+    }
+
+    private static func decodeHTMLEntities(_ input: String) -> String {
+        var s = input
+        let namedEntities: [String: String] = [
+            "&nbsp;": " ",
+            "&amp;": "&",
+            "&lt;": "<",
+            "&gt;": ">",
+            "&quot;": "\"",
+            "&apos;": "'"
+        ]
+        for (entity, replacement) in namedEntities {
+            s = s.replacingOccurrences(of: entity, with: replacement)
+        }
+
+        let pattern = #"&#(x?[0-9A-Fa-f]+);"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return s }
+        let nsString = s as NSString
+        let matches = regex.matches(in: s, range: NSRange(location: 0, length: nsString.length)).reversed()
+        var result = s
+
+        for match in matches {
+            let token = nsString.substring(with: match.range(at: 1))
+            let scalarValue: UInt32?
+            if token.lowercased().hasPrefix("x") {
+                scalarValue = UInt32(token.dropFirst(), radix: 16)
+            } else {
+                scalarValue = UInt32(token, radix: 10)
+            }
+
+            guard let scalarValue,
+                  let scalar = UnicodeScalar(scalarValue) else { continue }
+            result = (result as NSString).replacingCharacters(in: match.range, with: String(Character(scalar)))
+        }
+
+        return result
     }
 
     private static func mergeAdjacentText(_ segments: [DefinitionSegment]) -> [DefinitionSegment] {
@@ -131,123 +197,77 @@ struct LinkedDefinitionView: View {
     let onVerseTap:    (Int, Int, Int) -> Void   // bookNumber, chapter, verse
     let onStrongsTap:  (String) -> Void          // Strong's number
 
-    @State private var versePopover:   (Int, Int, Int)? = nil   // bookNumber, chapter, verse
-    @State private var strongsPopover: String?           = nil   // Strong's number
+    @State private var selectedVerseTarget: VerseLinkTarget?
     @EnvironmentObject var myBible: MyBibleService
 
     private var segments: [DefinitionSegment] {
         DefinitionParser.parse(html)
     }
 
-    var body: some View {
-        // Build a flow of Text + Button segments
-        // We use a wrapping approach with VStack + HStack flow simulation
-        // For simplicity, render as a series of inline elements using .init concat
-        VStack(alignment: .leading, spacing: 4) {
-            // Split by newlines first, then render each line
-            let lines = reconstructLines(segments)
-            ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
-                if line.isEmpty {
-                    Spacer().frame(height: 4)
-                } else {
-                    lineView(line)
-                }
+    private var attributedText: AttributedString {
+        var output = AttributedString()
+
+        for segment in segments {
+            switch segment {
+            case .text(let text):
+                var piece = AttributedString(text)
+                piece.foregroundColor = textColor
+                output += piece
+
+            case .verseLink(let label, let bookNumber, let chapter, let verseStart, let verseEnd):
+                var piece = AttributedString(label)
+                piece.foregroundColor = accentColor
+                piece.underlineStyle = .single
+                piece.link = URL(string: "verse://\(bookNumber)/\(chapter)/\(verseStart)/\(verseEnd)")
+                output += piece
+
+            case .strongsLink(let label, _):
+                var piece = AttributedString(label)
+                piece.foregroundColor = textColor
+                output += piece
             }
         }
+
+        return output
     }
-
-    @ViewBuilder
-    private func lineView(_ segs: [DefinitionSegment]) -> some View {
-        // Render segments inline using Text concatenation where possible
-        // Links become buttons with popovers
-        WrappingHStack(segs: segs, font: font, textColor: textColor, accentColor: accentColor,
-                       versePopover: $versePopover, strongsPopover: $strongsPopover)
-    }
-
-    private func reconstructLines(_ segments: [DefinitionSegment]) -> [[DefinitionSegment]] {
-        var lines: [[DefinitionSegment]] = [[]]
-        for seg in segments {
-            if case .text(let t) = seg {
-                let parts = t.components(separatedBy: "\n")
-                for (i, part) in parts.enumerated() {
-                    if i > 0 { lines.append([]) }
-                    if !part.isEmpty {
-                        lines[lines.count - 1].append(.text(part))
-                    }
-                }
-            } else {
-                lines[lines.count - 1].append(seg)
-            }
-        }
-        return lines
-    }
-}
-
-// MARK: - Wrapping HStack for inline segments
-
-struct WrappingHStack: View {
-    let segs:         [DefinitionSegment]
-    let font:         Font
-    let textColor:    Color
-    let accentColor:  Color
-    @Binding var versePopover:   (Int, Int, Int)?
-    @Binding var strongsPopover: String?
 
     var body: some View {
-        // Use a flow layout approach — build a Text where possible, insert buttons for links
-        HStack(alignment: .firstTextBaseline, spacing: 0) {
-            ForEach(Array(segs.enumerated()), id: \.offset) { _, seg in
-                switch seg {
-                case .text(let t):
-                    Text(t)
-                        .font(font)
-                        .foregroundStyle(textColor)
-                        .fixedSize(horizontal: false, vertical: true)
+        Text(attributedText)
+            .font(font)
+            .lineSpacing(6)
+            .environment(\.openURL, OpenURLAction { url in
+                guard let scheme = url.scheme else { return .systemAction }
 
-                case .verseLink(let label, let bookNum, let chapter, let verse):
-                    Button {
-                        versePopover = (bookNum, chapter, verse)
-                    } label: {
-                        Text(label)
-                            .font(font.weight(.semibold))
-                            .foregroundStyle(accentColor)
-                            .underline()
-                    }
-                    .buttonStyle(.plain)
-                    .popover(isPresented: Binding(
-                        get: { versePopover?.0 == bookNum && versePopover?.1 == chapter && versePopover?.2 == verse },
-                        set: { if !$0 { versePopover = nil } }
-                    ), arrowEdge: .bottom) {
-                        VersePreviewPopover(
-                            bookNumber: bookNum,
-                            chapter: chapter,
-                            verse: verse,
-                            accent: accentColor
-                        )
-                        .frame(width: 320)
-                    }
-
-                case .strongsLink(let label, let number):
-                    Button {
-                        strongsPopover = number
-                    } label: {
-                        Text(label)
-                            .font(font.weight(.semibold))
-                            .foregroundStyle(accentColor)
-                            .underline()
-                    }
-                    .buttonStyle(.plain)
-                    .popover(isPresented: Binding(
-                        get: { strongsPopover == number },
-                        set: { if !$0 { strongsPopover = nil } }
-                    ), arrowEdge: .bottom) {
-                        StrongsPreviewPopover(number: number, accent: accentColor)
-                            .frame(width: 320)
+                if scheme == "verse" {
+                    let pathComponents = url.pathComponents.filter { $0 != "/" }
+                    if let host = url.host,
+                       pathComponents.count >= 2,
+                       let bookNumber = Int(host),
+                       let chapter = Int(pathComponents[0]),
+                       let verseStart = Int(pathComponents[1]) {
+                        let verseEnd = pathComponents.count > 2 ? (Int(pathComponents[2]) ?? verseStart) : verseStart
+                        selectedVerseTarget = VerseLinkTarget(bookNumber: bookNumber, chapter: chapter, verseStart: verseStart, verseEnd: verseEnd)
+                        return .handled
                     }
                 }
+
+                return .systemAction
+            })
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .popover(item: $selectedVerseTarget, arrowEdge: .bottom) { target in
+                VersePreviewPopover(
+                    bookNumber: target.bookNumber,
+                    chapter: target.chapter,
+                    verseStart: target.verseStart,
+                    verseEnd: target.verseEnd,
+                    accent: accentColor,
+                    onOpenInBible: {
+                        onVerseTap(target.bookNumber, target.chapter, target.verseStart)
+                        selectedVerseTarget = nil
+                    }
+                )
+                .frame(width: 320)
             }
-        }
-        .fixedSize(horizontal: false, vertical: true)
     }
 }
 
@@ -256,8 +276,10 @@ struct WrappingHStack: View {
 struct VersePreviewPopover: View {
     let bookNumber: Int
     let chapter:    Int
-    let verse:      Int
+    let verseStart: Int
+    let verseEnd:   Int
     let accent:     Color
+    var onOpenInBible: (() -> Void)? = nil
 
     @EnvironmentObject var myBible: MyBibleService
     @State private var verseText: String = ""
@@ -279,9 +301,28 @@ struct VersePreviewPopover: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("\(bookName) \(chapter):\(verse)")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(accent)
+            Group {
+                if let onOpenInBible {
+                    Button {
+                        onOpenInBible()
+                    } label: {
+                        Text(title)
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(accent)
+                            .underline()
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Open in Bible")
+                } else {
+                    Text(title)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(accent)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                        .help("Open in Bible")
+                }
+            }
             Divider()
             if loading {
                 ProgressView().controlSize(.small)
@@ -292,10 +333,14 @@ struct VersePreviewPopover: View {
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
             } else {
-                Text(verseText)
-                    .font(.system(size: 13))
-                    .foregroundStyle(.primary)
-                    .lineSpacing(4)
+                ScrollView {
+                    Text(verseText)
+                        .font(.system(size: 13))
+                        .foregroundStyle(.primary)
+                        .lineSpacing(4)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .frame(minHeight: 160, maxHeight: 440)
             }
         }
         .padding(12)
@@ -304,15 +349,22 @@ struct VersePreviewPopover: View {
         }
     }
 
+    private var title: String {
+        if verseStart == verseEnd {
+            return "\(bookName) \(chapter):\(verseStart)"
+        }
+        return "\(bookName) \(chapter):\(verseStart)-\(verseEnd)"
+    }
+
     private func loadVerse() async {
         loading = true
         guard let bible = myBible.selectedBible else {
             loading = false
             return
         }
-        let verses = await myBible.loadChapterVerses(
-            module: bible, bookNumber: bookNumber, chapter: chapter)
-        verseText = verses.first(where: { $0.verse == verse })?.text ?? ""
+        let verses = await myBible.fetchVerses(module: bible, bookNumber: bookNumber, chapter: chapter)
+        let rangeVerses = verses.filter { $0.verse >= verseStart && $0.verse <= verseEnd }
+        verseText = rangeVerses.map { "\($0.verse) \($0.text)" }.joined(separator: "\n\n")
         loading = false
     }
 }
@@ -325,74 +377,65 @@ struct StrongsPreviewPopover: View {
     var module:  MyBibleModule? = nil   // if nil, falls back to selectedStrongs
 
     @EnvironmentObject var myBible: MyBibleService
+    @State private var currentNumber: String
     @State private var entry: StrongsEntry? = nil
     @State private var loading = true
+    @State private var backStack: [String] = []
+    @State private var forwardStack: [String] = []
+    @State private var selectedVerseTarget: VerseLinkTarget?
+
+    init(number: String, accent: Color, module: MyBibleModule? = nil) {
+        self.number = number
+        self.accent = accent
+        self.module = module
+        _currentNumber = State(initialValue: number)
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(number)
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(accent)
-            Divider()
+        VStack(alignment: .leading, spacing: 0) {
+            header
             if loading {
                 ProgressView().controlSize(.small)
                     .frame(maxWidth: .infinity, alignment: .center)
-                    .padding(.vertical, 8)
+                    .padding(.vertical, 16)
             } else if let e = entry {
-                if !e.lexeme.isEmpty {
-                    Text(e.lexeme)
-                        .font(.system(size: 14))
-                        .foregroundStyle(.primary)
-                }
-                if !e.transliteration.isEmpty {
-                    Text(e.transliteration)
-                        .font(.system(size: 12).italic())
-                        .foregroundStyle(.secondary)
-                }
-                // Show short definition as a quick summary if available
-                if !e.shortDefinition.isEmpty {
-                    Text(e.shortDefinition)
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                }
-                // Full definition — use strongsDefinition, fall back to derivation, fall back to raw html
-                let def = [e.strongsDefinition, e.derivation, e.kjv]
-                    .first(where: { !$0.isEmpty }) ?? ""
-                if !def.isEmpty {
-                    Divider()
-                    ScrollView {
-                        Text(def)
-                            .font(.system(size: 12))
-                            .foregroundStyle(.primary)
-                            .lineSpacing(4)
-                            .fixedSize(horizontal: false, vertical: true)
+                Divider()
+                StrongsPopoverWebView(
+                    html: strongsCardHTML(for: e),
+                    onVerseTap: { target in
+                        selectedVerseTarget = target
+                    },
+                    onStrongsTap: { tappedNumber in
+                        navigateToStrongs(tappedNumber)
                     }
-                    .frame(maxHeight: 200)
-                } else if !e.rawDefinition.isEmpty {
-                    // VGNT / prose HTML format — render with link support
-                    Divider()
-                    ScrollView {
-                        LinkedDefinitionView(
-                            html: e.rawDefinition,
-                            font: .system(size: 12),
-                            textColor: .primary,
-                            accentColor: accent,
-                            onVerseTap: { _, _, _ in },
-                            onStrongsTap: { _ in }
-                        )
-                        .fixedSize(horizontal: false, vertical: true)
-                    }
-                    .frame(maxHeight: 200)
-                }
+                )
+                .frame(minHeight: 220, idealHeight: 320, maxHeight: 420)
+                footer
             } else {
                 Text("Not found")
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
+                    .padding(12)
             }
         }
-        .padding(12)
-        .task {
+        .background(Color(red: 0.973, green: 0.890, blue: 0.667))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(Color.black.opacity(0.12), lineWidth: 1)
+        )
+        .task(id: currentNumber) {
             await loadEntry()
+        }
+        .popover(item: $selectedVerseTarget, arrowEdge: .bottom) { target in
+            VersePreviewPopover(
+                bookNumber: target.bookNumber,
+                chapter: target.chapter,
+                verseStart: target.verseStart,
+                verseEnd: target.verseEnd,
+                accent: accent
+            )
+            .frame(width: 320)
         }
     }
 
@@ -405,9 +448,382 @@ struct StrongsPreviewPopover: View {
         }
         entry = await myBible.lookupStrongs(
             module: strongsModule,
-            number: number,
-            isOldTestament: number.hasPrefix("H")
+            number: currentNumber,
+            isOldTestament: currentNumber.uppercased().hasPrefix("H")
         )
         loading = false
+    }
+
+    @ViewBuilder
+    private var header: some View {
+        HStack(alignment: .top) {
+            Text(headerTitle)
+                .font(.system(size: 18, weight: .bold))
+                .foregroundStyle(Color(red: 0.78, green: 0.02, blue: 0.02))
+                .underline()
+            Spacer()
+            if let badge = sourceBadge {
+                Text(badge)
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundStyle(Color(red: 0.78, green: 0.02, blue: 0.02))
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.top, 12)
+        .padding(.bottom, 10)
+    }
+
+    @ViewBuilder
+    private var footer: some View {
+        HStack {
+            Button {
+                guard let previous = backStack.popLast() else { return }
+                forwardStack.append(currentNumber)
+                currentNumber = previous
+            } label: {
+                Image(systemName: "chevron.left")
+            }
+            .buttonStyle(.plain)
+            .disabled(backStack.isEmpty)
+            .opacity(backStack.isEmpty ? 0.35 : 1)
+
+            Button {
+                guard let next = forwardStack.popLast() else { return }
+                backStack.append(currentNumber)
+                currentNumber = next
+            } label: {
+                Image(systemName: "chevron.right")
+            }
+            .buttonStyle(.plain)
+            .disabled(forwardStack.isEmpty)
+            .opacity(forwardStack.isEmpty ? 0.35 : 1)
+
+            Spacer()
+
+            Text(currentNumber)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.secondary)
+        }
+        .foregroundStyle(Color(red: 0.17, green: 0.24, blue: 0.43))
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+    }
+
+    private var headerTitle: String {
+        guard let entry else { return currentNumber }
+        let summary = entry.shortDefinition.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !summary.isEmpty else { return currentNumber }
+        return "\(currentNumber) (\(summary))."
+    }
+
+    private var sourceBadge: String? {
+        guard let entry else { return nil }
+        if entry.hasExpandedDefinition { return "ETCBC+" }
+        if entry.sourceFlags == "strong" { return "Strong's" }
+        return entry.sourceFlags.uppercased()
+    }
+
+    private func navigateToStrongs(_ tappedNumber: String) {
+        let normalised = tappedNumber.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalised.isEmpty, normalised != currentNumber else { return }
+        backStack.append(currentNumber)
+        forwardStack.removeAll()
+        currentNumber = normalised
+    }
+
+    private func strongsCardHTML(for entry: StrongsEntry) -> String {
+        StrongsCardRenderer.html(for: entry)
+    }
+
+    private func headerLine(for entry: StrongsEntry) -> String {
+        let parts = [
+            entry.lexeme.isEmpty ? nil : "<span class=\"lexeme\">\(entry.lexeme)</span>",
+            entry.transliteration.isEmpty ? nil : "<span class=\"meta\">(\(entry.transliteration)</span>",
+            entry.pronunciation.isEmpty ? nil : "<span class=\"meta\">\(entry.pronunciation)</span>",
+            partOfSpeech(in: entry.preferredDefinitionHTML).map { "<span class=\"pos\">\($0)</span>" },
+            entry.shortDefinition.isEmpty ? nil : "<span class=\"gloss\">\(entry.shortDefinition)</span><span class=\"meta\">)</span>"
+        ].compactMap { $0 }
+
+        guard !parts.isEmpty else { return "" }
+        return "<div class=\"entry-title\">\(parts.joined(separator: " <span class=\"meta\">|</span> "))</div>"
+    }
+
+    private func referencesLine(for entry: StrongsEntry) -> String {
+        guard !entry.references.isEmpty else { return "" }
+        return "<hr><div class=\"refs\">\(normaliseStrongsHTML(entry.references))</div>"
+    }
+
+    private func partOfSpeech(in html: String) -> String? {
+        let pattern = #"<span class="part-of-speech">.*?<span class="[^"]+">([^<]+)</span>.*?</span>"#
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.dotMatchesLineSeparators]) else { return nil }
+        let nsHTML = html as NSString
+        guard let match = regex.firstMatch(in: html, range: NSRange(location: 0, length: nsHTML.length)),
+              match.numberOfRanges > 1 else { return nil }
+        return nsHTML.substring(with: match.range(at: 1)).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func normaliseStrongsHTML(_ html: String) -> String {
+        StrongsCardRenderer.normaliseStrongsHTML(html)
+    }
+}
+
+struct StrongsPopoverWebView: WKViewRepresentable {
+    let html: String
+    var onVerseTap: (VerseLinkTarget) -> Void
+    var onStrongsTap: (String) -> Void
+
+    #if os(macOS)
+    func makeNSView(context: Context) -> WKWebView { makeWebView(context: context) }
+    func updateNSView(_ webView: WKWebView, context: Context) { updateWebView(webView, context: context) }
+    #else
+    func makeUIView(context: Context) -> WKWebView { makeWebView(context: context) }
+    func updateUIView(_ webView: WKWebView, context: Context) { updateWebView(webView, context: context) }
+    #endif
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onVerseTap: onVerseTap, onStrongsTap: onStrongsTap)
+    }
+
+    private func makeWebView(context: Context) -> WKWebView {
+        let webView = WKWebView(frame: .zero)
+        webView.navigationDelegate = context.coordinator
+        webView.setValue(false, forKey: "drawsBackground")
+        load(html, in: webView, coordinator: context.coordinator)
+        return webView
+    }
+
+    private func updateWebView(_ webView: WKWebView, context: Context) {
+        context.coordinator.onVerseTap = onVerseTap
+        context.coordinator.onStrongsTap = onStrongsTap
+        if context.coordinator.lastHTML != html {
+            load(html, in: webView, coordinator: context.coordinator)
+        }
+    }
+
+    private func load(_ html: String, in webView: WKWebView, coordinator: Coordinator) {
+        coordinator.lastHTML = html
+        webView.loadHTMLString(html, baseURL: nil)
+    }
+
+    final class Coordinator: NSObject, WKNavigationDelegate {
+        var lastHTML: String = ""
+        var onVerseTap: (VerseLinkTarget) -> Void
+        var onStrongsTap: (String) -> Void
+
+        init(onVerseTap: @escaping (VerseLinkTarget) -> Void, onStrongsTap: @escaping (String) -> Void) {
+            self.onVerseTap = onVerseTap
+            self.onStrongsTap = onStrongsTap
+        }
+
+        func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+            guard let url = action.request.url else {
+                decisionHandler(.allow)
+                return
+            }
+            let rawURL = url.absoluteString
+            if rawURL.hasPrefix("about:") || rawURL.isEmpty {
+                decisionHandler(.allow)
+                return
+            }
+
+            let decoded = rawURL.removingPercentEncoding ?? rawURL
+            if decoded.uppercased().hasPrefix("B:") {
+                if let target = verseTarget(from: String(decoded.dropFirst(2))) {
+                    onVerseTap(target)
+                }
+                decisionHandler(.cancel)
+                return
+            }
+
+            if let strongsTarget = strongsTarget(from: decoded) {
+                onStrongsTap(strongsTarget)
+                decisionHandler(.cancel)
+                return
+            }
+
+            if decoded.lowercased().hasPrefix("s:") {
+                decisionHandler(.cancel)
+                return
+            }
+
+            decisionHandler(.allow)
+        }
+
+        private func strongsTarget(from decodedURL: String) -> String? {
+            guard decodedURL.count >= 3 else { return nil }
+
+            let prefix = decodedURL.prefix(2).lowercased()
+            guard prefix == "s:" else { return nil }
+
+            let target = String(decodedURL.dropFirst(2)).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !target.isEmpty else { return nil }
+
+            let pattern = #"^(?:[GH]\d+[A-Z]?|\d+[A-Z]?)$"#
+            guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
+            let uppercasedTarget = target.uppercased()
+            let range = NSRange(uppercasedTarget.startIndex..<uppercasedTarget.endIndex, in: uppercasedTarget)
+            guard regex.firstMatch(in: uppercasedTarget, options: [], range: range) != nil else { return nil }
+
+            return target
+        }
+
+        private func verseTarget(from ref: String) -> VerseLinkTarget? {
+            let parts = ref.components(separatedBy: " ")
+            guard parts.count >= 2, let bookNumber = Int(parts[0]) else { return nil }
+            let cv = parts[1...].joined().components(separatedBy: ":")
+            guard let chapter = Int(cv[0].trimmingCharacters(in: .whitespaces)) else { return nil }
+            var verseStart = 0
+            var verseEnd = 0
+            if cv.count >= 2 {
+                let verseParts = cv[1].components(separatedBy: CharacterSet(charactersIn: "-–"))
+                verseStart = Int(verseParts.first?.trimmingCharacters(in: .whitespaces) ?? "") ?? 0
+                verseEnd = verseParts.count > 1 ? (Int(verseParts[1].trimmingCharacters(in: .whitespaces)) ?? verseStart) : verseStart
+            }
+            guard verseStart > 0 else { return nil }
+            return VerseLinkTarget(bookNumber: bookNumber, chapter: chapter, verseStart: verseStart, verseEnd: verseEnd)
+        }
+    }
+}
+
+enum StrongsCardRenderer {
+    static func html(for entry: StrongsEntry) -> String {
+        let body = normaliseStrongsHTML(entry.preferredDefinitionHTML)
+        let titleLine = headerLine(for: entry)
+        let referencesLine = referencesLine(for: entry)
+
+        return """
+        <!DOCTYPE html>
+        <html>
+        <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width,initial-scale=1.0">
+        <style>
+          html, body {
+            margin: 0;
+            padding: 0;
+            background: transparent;
+            color: #0d2b72;
+            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", serif;
+            font-size: 18px;
+            line-height: 1.45;
+            -webkit-font-smoothing: antialiased;
+          }
+          body { padding: 14px; }
+          hr {
+            border: 0;
+            border-top: 1px solid rgba(13, 43, 114, 0.55);
+            margin: 14px 0;
+          }
+          a {
+            color: #c90f10;
+            text-decoration: none;
+          }
+          a:hover { text-decoration: underline; }
+          .entry-title {
+            font-size: 18px;
+            margin-bottom: 14px;
+            color: #0d2b72;
+          }
+          .entry-title .lexeme {
+            font-size: 23px;
+            font-weight: 700;
+          }
+          .entry-title .meta {
+            color: #6c7585;
+          }
+          .entry-title .pos {
+            color: #c200d0;
+            font-weight: 600;
+          }
+          .entry-title .gloss {
+            color: #0027ff;
+          }
+          .refs {
+            color: #0d2b72;
+            margin-bottom: 12px;
+          }
+          .refs i { color: #0d2b72; }
+          .refs a { color: #c90f10; }
+          .source-marker {
+            color: inherit;
+            text-decoration: none;
+          }
+          .refs grk, .refs heb, grk, heb, el, wh, wg {
+            color: #c90f10;
+            font-style: normal;
+          }
+          .translit {
+            color: #6c7585;
+          }
+          .section-label {
+            font-weight: 700;
+          }
+          big { font-size: 1.15em; }
+        </style>
+        </head>
+        <body>
+          \(titleLine)
+          \(referencesLine)
+          \(body)
+        </body>
+        </html>
+        """
+    }
+
+    private static func headerLine(for entry: StrongsEntry) -> String {
+        let parts = [
+            entry.lexeme.isEmpty ? nil : "<span class=\"lexeme\">\(entry.lexeme)</span>",
+            entry.transliteration.isEmpty ? nil : "<span class=\"meta\">(\(entry.transliteration)</span>",
+            entry.pronunciation.isEmpty ? nil : "<span class=\"meta\">\(entry.pronunciation)</span>",
+            partOfSpeech(in: entry.preferredDefinitionHTML).map { "<span class=\"pos\">\($0)</span>" },
+            entry.shortDefinition.isEmpty ? nil : "<span class=\"gloss\">\(entry.shortDefinition)</span><span class=\"meta\">)</span>"
+        ].compactMap { $0 }
+
+        guard !parts.isEmpty else { return "" }
+        return "<div class=\"entry-title\">\(parts.joined(separator: " <span class=\"meta\">|</span> "))</div>"
+    }
+
+    private static func referencesLine(for entry: StrongsEntry) -> String {
+        guard !entry.references.isEmpty else { return "" }
+        return "<hr><div class=\"refs\">\(normaliseStrongsHTML(entry.references))</div>"
+    }
+
+    private static func partOfSpeech(in html: String) -> String? {
+        let pattern = #"<span class=\"part-of-speech\">.*?<span class=\"[^\"]+\">([^<]+)</span>.*?</span>"#
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.dotMatchesLineSeparators]) else { return nil }
+        let nsHTML = html as NSString
+        guard let match = regex.firstMatch(in: html, range: NSRange(location: 0, length: nsHTML.length)),
+              match.numberOfRanges > 1 else { return nil }
+        return nsHTML.substring(with: match.range(at: 1)).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    static func normaliseStrongsHTML(_ html: String) -> String {
+        var output = html
+        let replacements: [(String, String)] = [
+            ("<font color='5'>", "<span class=\"translit\">"),
+            ("<font color=\"5\">", "<span class=\"translit\">"),
+            ("</font>", "</span>"),
+            ("<grk>", "<span class=\"grk\">"),
+            ("</grk>", "</span>"),
+            ("<heb>", "<span class=\"heb\">"),
+            ("</heb>", "</span>"),
+            ("<el>", "<span class=\"grk\">"),
+            ("</el>", "</span>")
+        ]
+        for (from, to) in replacements {
+            output = output.replacingOccurrences(of: from, with: to)
+        }
+        if let sourceAnchorRegex = try? NSRegularExpression(
+            pattern: #"<a\b[^>]*href\s*=\s*['"]s:[^'"]+['"][^>]*>(.*?)</a>"#,
+            options: [.dotMatchesLineSeparators]
+        ) {
+            let range = NSRange(output.startIndex..<output.endIndex, in: output)
+            output = sourceAnchorRegex.stringByReplacingMatches(in: output, options: [], range: range, withTemplate: "<span class=\"source-marker\">$1</span>")
+        }
+        if let regex = try? NSRegularExpression(pattern: #"\bs:[a-z0-9._-]+\b"#) {
+            let range = NSRange(output.startIndex..<output.endIndex, in: output)
+            output = regex.stringByReplacingMatches(in: output, options: [], range: range, withTemplate: "")
+        }
+        return output
     }
 }

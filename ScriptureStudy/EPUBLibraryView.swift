@@ -68,6 +68,10 @@ struct EPUBLibraryView: View {
     @State private var selectedInitialHref:  String?     = nil
     @State private var selectedSearchQuery:  String?     = nil
     @State private var selectedInitialScrollY: Double    = 0
+    /// Page to jump to when opening a PDF from a bookmark click in the
+    /// unified bookmarks panel. Cleared back to nil when the reader
+    /// closes so subsequent opens honour restoreLastPage instead.
+    @State private var selectedInitialPDFPage: Int?      = nil
     @State private var bookToDelete:   BookFile?   = nil
     @State private var showingImportPicker: Bool   = false
     @State private var activeTab:           String = "mybooks"
@@ -79,7 +83,38 @@ struct EPUBLibraryView: View {
     @AppStorage("epubViewMode")   private var viewMode:       String = "large"
     @AppStorage("epubSortOrder")  private var sortOrder:      String = "title"
     @AppStorage("epubLastOpened")  private var lastOpenedData:  Data   = Data()
-    @State private var allEpubBookmarks: [(book: BookFile, bookmark: EPUBBookmark)] = []
+    /// Unified entry for the right-hand "Bookmarks" panel — wraps either
+    /// an EPUB bookmark (with its href + scrollY for resume) or a PDF
+    /// bookmark (with its page number). Loaded together from each
+    /// reader's UserDefaults store so the panel can show all bookmarks
+    /// across both reader types in one consolidated list.
+    enum LibraryBookmark: Identifiable {
+        case epub(book: BookFile, bookmark: EPUBBookmark)
+        case pdf(book: BookFile, bookmark: PDFBookmark)
+
+        var id: String {
+            switch self {
+            case .epub(_, let bm): return "epub_\(bm.id.uuidString)"
+            case .pdf(_, let bm):  return "pdf_\(bm.id.uuidString)"
+            }
+        }
+
+        var book: BookFile {
+            switch self {
+            case .epub(let book, _): return book
+            case .pdf(let book, _):  return book
+            }
+        }
+
+        var title: String {
+            switch self {
+            case .epub(_, let bm): return bm.title
+            case .pdf(_, let bm):  return bm.title
+            }
+        }
+    }
+
+    @State private var allLibraryBookmarks: [LibraryBookmark] = []
     @State private var formatFilter: String = "all"
 
     var sortedBooks: [BookFile] {
@@ -171,7 +206,7 @@ struct EPUBLibraryView: View {
             if let url = selectedURL {
                 Group {
                     if selectedFormat?.isPDF == true {
-                        PDFReaderView(pdfURL: url)
+                        PDFReaderView(pdfURL: url, initialPage: selectedInitialPDFPage)
                     } else {
                         EPUBReaderView(epubURL: url,
                                        initialHref: selectedInitialHref,
@@ -179,7 +214,14 @@ struct EPUBLibraryView: View {
                                        initialScrollY: selectedInitialScrollY)
                     }
                 }
-                .safeAreaInset(edge: .top, spacing: 0) {
+                .safeAreaInset(edge: .bottom, spacing: 0) {
+                    // Archives back button at the BOTTOM rather than the
+                    // top. Two benefits over the previous top placement:
+                    // (1) nothing above the reader for the WKWebView's
+                    // overlay scroller to bleed behind; (2) the back
+                    // button stays in a fixed reachable position as the
+                    // user scrolls through long books. Divider on top
+                    // gives a clean separation from the reading area.
                     HStack(spacing: 6) {
                         Button {
                             selectedURL            = nil
@@ -187,6 +229,7 @@ struct EPUBLibraryView: View {
                             selectedInitialHref    = nil
                             selectedSearchQuery    = nil
                             selectedInitialScrollY = 0
+                            selectedInitialPDFPage = nil
                         } label: {
                             Label("Archives", systemImage: "chevron.left")
                                 .labelStyle(.titleAndIcon)
@@ -201,8 +244,8 @@ struct EPUBLibraryView: View {
                     }
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
-                    .background(.bar)
-                    .overlay(alignment: .bottom) {
+                    .background(Color.platformWindowBg)
+                    .overlay(alignment: .top) {
                         Divider()
                     }
                 }
@@ -793,7 +836,7 @@ struct EPUBLibraryView: View {
                     .padding(.top, 12)
                     .padding(.bottom, 6)
 
-                if allEpubBookmarks.isEmpty {
+                if allLibraryBookmarks.isEmpty {
                     VStack(spacing: 8) {
                         Spacer()
                         Image(systemName: "bookmark")
@@ -806,17 +849,29 @@ struct EPUBLibraryView: View {
                 } else {
                     ScrollView {
                         LazyVStack(spacing: 0) {
-                            ForEach(allEpubBookmarks, id: \.bookmark.id) { pair in
-                                let bm        = pair.bookmark
-                                let book      = pair.book
+                            ForEach(allLibraryBookmarks) { entry in
+                                let book      = entry.book
                                 let bookTitle = cleanTitle(book.url)
 
                                 Button {
-                                    selectedInitialHref    = bm.href
-                                    selectedSearchQuery    = nil
-                                    selectedInitialScrollY = bm.scrollY
-                                    selectedURL            = book.url
-                                    selectedFormat         = .epub
+                                    // Dispatch by format. EPUB carries
+                                    // href + scrollY; PDF carries page.
+                                    switch entry {
+                                    case .epub(_, let bm):
+                                        selectedInitialHref    = bm.href
+                                        selectedSearchQuery    = nil
+                                        selectedInitialScrollY = bm.scrollY
+                                        selectedInitialPDFPage = nil
+                                        selectedURL            = book.url
+                                        selectedFormat         = .epub
+                                    case .pdf(_, let bm):
+                                        selectedInitialHref    = nil
+                                        selectedSearchQuery    = nil
+                                        selectedInitialScrollY = 0
+                                        selectedInitialPDFPage = bm.page
+                                        selectedURL            = book.url
+                                        selectedFormat         = .pdf
+                                    }
                                     recordOpened(book.url)
                                 } label: {
                                     VStack(alignment: .leading, spacing: 2) {
@@ -829,8 +884,8 @@ struct EPUBLibraryView: View {
                                         HStack(spacing: 8) {
                                             Image(systemName: "bookmark.fill")
                                                 .font(.system(size: 10))
-                                                .foregroundStyle(Color(red: 0.30, green: 0.50, blue: 0.75))
-                                            Text(bm.title)
+                                                .foregroundStyle(SilkBookmarkRibbonView.silkRed)
+                                            Text(entry.title)
                                                 .font(.system(size: 11, weight: .medium))
                                                 .lineLimit(1)
                                                 .truncationMode(.tail)
@@ -845,7 +900,7 @@ struct EPUBLibraryView: View {
                                     .contentShape(Rectangle())
                                 }
                                 .buttonStyle(.plain)
-                                .help("\(bookTitle) — \(bm.title)")
+                                .help("\(bookTitle) — \(entry.title)")
                                 Divider().padding(.leading, 32)
                             }
                         }
@@ -857,18 +912,33 @@ struct EPUBLibraryView: View {
         }
         .background(Color.platformWindowBg)
         .onAppear { loadAllBookmarks() }
+        // Auto-refresh whenever any reader (EPUB or PDF) mutates its
+        // bookmark store. Both readers post .libraryBookmarksChanged
+        // after add/remove, including the in-reader sidebar X buttons.
+        .onReceive(NotificationCenter.default.publisher(
+            for: .libraryBookmarksChanged)) { _ in
+            loadAllBookmarks()
+        }
     }
 
     private func loadAllBookmarks() {
-        var pairs: [(book: BookFile, bookmark: EPUBBookmark)] = []
-        for book in bookFiles where book.format.isEPUB {
-            let key = "epubBookmarks_\(book.url.lastPathComponent)"
-            if let data = UserDefaults.standard.data(forKey: key),
-               let bms = try? JSONDecoder().decode([EPUBBookmark].self, from: data) {
-                for bm in bms { pairs.append((book: book, bookmark: bm)) }
+        var entries: [LibraryBookmark] = []
+        for book in bookFiles {
+            if book.format.isEPUB {
+                let key = "epubBookmarks_\(book.url.lastPathComponent)"
+                if let data = UserDefaults.standard.data(forKey: key),
+                   let bms = try? JSONDecoder().decode([EPUBBookmark].self, from: data) {
+                    for bm in bms { entries.append(.epub(book: book, bookmark: bm)) }
+                }
+            } else if book.format.isPDF {
+                let key = "pdf_bookmarks_\(book.url.lastPathComponent)"
+                if let data = UserDefaults.standard.data(forKey: key),
+                   let bms = try? JSONDecoder().decode([PDFBookmark].self, from: data) {
+                    for bm in bms { entries.append(.pdf(book: book, bookmark: bm)) }
+                }
             }
         }
-        allEpubBookmarks = pairs
+        allLibraryBookmarks = entries
     }
 
 

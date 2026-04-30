@@ -8,6 +8,7 @@ enum SearchScope: String, CaseIterable {
     case bible      = "Bible"
     case notes      = "Notes"
     case commentary = "Commentary"
+    case reference  = "References"
 }
 
 enum Testament { case ot, nt, both }
@@ -45,6 +46,7 @@ struct SearchView: View {
 
     var bibleModules:      [MyBibleModule] { myBible.visibleModules.filter { $0.type == .bible } }
     var commentaryModules: [MyBibleModule] { myBible.visibleModules.filter { $0.type == .commentary } }
+    var referenceModules:  [MyBibleModule] { myBible.visibleModules.filter { $0.type == .dictionary || $0.type == .encyclopedia } }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -238,9 +240,9 @@ struct SearchView: View {
             VStack(spacing: 12) {
                 Spacer()
                 Image(systemName: "magnifyingglass").font(.system(size: 44)).foregroundStyle(.quaternary)
-                Text("Search your Bible, notes\nand commentary")
+                Text("Search your Bible, notes,\ncommentary, and references")
                     .multilineTextAlignment(.center).foregroundStyle(.secondary)
-                Text("Wrap phrases in \u{201C}quotes\u{201D} for exact matching.\nUse filters to narrow by version or book.")
+                Text("Wrap phrases in \u{201C}quotes\u{201D} for exact matching.\nUse filters to narrow Bible versions or books.")
                     .font(.caption).multilineTextAlignment(.center).foregroundStyle(.tertiary)
                     .padding(.horizontal)
                 Spacer()
@@ -261,7 +263,7 @@ struct SearchView: View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
                 let grouped = Dictionary(grouping: results, by: \.type)
-                ForEach([SearchResult.ResultType.bible, .notes, .commentary], id: \.self) { type in
+                ForEach([SearchResult.ResultType.bible, .notes, .commentary, .reference], id: \.self) { type in
                     if let group = grouped[type], !group.isEmpty {
                         HStack(spacing: 6) {
                             Image(systemName: type.icon).font(.caption)
@@ -318,20 +320,25 @@ struct SearchView: View {
 
         // Capture MainActor data
         var bibleSet = [String: ModuleInfo]()
-        if let sel = myBible.selectedBible {
+        if let sel = myBible.selectedBible,
+           myBible.visibleModules.contains(sel) {
             bibleSet[sel.filePath] = ModuleInfo(path: sel.filePath, name: sel.name)
         }
-        for m in myBible.modules where m.type == .bible {
+        for m in myBible.visibleModules where m.type == .bible {
             if selectedBibleIDs.isEmpty || selectedBibleIDs.contains(m.filePath) {
                 bibleSet[m.filePath] = ModuleInfo(path: m.filePath, name: m.name)
             }
         }
         let bibles = Array(bibleSet.values)
 
-        let commentaries = myBible.modules.filter {
+        let commentaries = myBible.visibleModules.filter {
             $0.type == .commentary &&
             (selectedCommentaryIDs.isEmpty || selectedCommentaryIDs.contains($0.filePath))
         }.map { ModuleInfo(path: $0.filePath, name: $0.name) }
+
+        let references = selectedReferenceModules().map {
+            ModuleInfo(path: $0.filePath, name: $0.name)
+        }
 
         let capturedNotes   = notesManager.notes
         let capturedScope   = scope
@@ -349,14 +356,16 @@ struct SearchView: View {
 
             if capturedScope == .all || capturedScope == .bible {
                 var seen = Set<String>()
+                let allowBroadBibleFallback = !selectedBibleIDs.isEmpty || bibles.count <= 2
                 for module in bibles {
                     let matches = searchBible(path: module.path, query: q,
                                              moduleName: module.name,
                                              testament: capturedTest,
                                              bookFilter: capturedBook,
-                                             exact: exact)
+                                             exact: exact,
+                                             allowFallback: allowBroadBibleFallback || module.path == myBible.selectedBible?.filePath)
                     for r in matches {
-                        let key = "\(r.bookNumber):\(r.chapter):\(r.verse)"
+                        let key = "\(r.moduleName):\(r.bookNumber):\(r.chapter):\(r.verse)"
                         if seen.insert(key).inserted { found.append(r) }
                     }
                 }
@@ -374,6 +383,13 @@ struct SearchView: View {
                 }
             }
 
+            if capturedScope == .all || capturedScope == .reference {
+                for module in references {
+                    found += searchReference(path: module.path, query: q,
+                                             moduleName: module.name, exact: exact)
+                }
+            }
+
             DispatchQueue.main.async {
                 self.results    = found
                 self.isSearching = false
@@ -384,7 +400,21 @@ struct SearchView: View {
     // MARK: - Bible search
 
     private func searchBible(path: String, query: String, moduleName: String,
-                              testament: Testament, bookFilter: Int, exact: Bool) -> [SearchResult] {
+                             testament: Testament, bookFilter: Int, exact: Bool,
+                             allowFallback: Bool) -> [SearchResult] {
+        if path.hasSuffix(".graphe") {
+            guard allowFallback else { return [] }
+            return searchBibleFallback(
+                db: openDatabase(at: path),
+                path: path,
+                query: query,
+                moduleName: moduleName,
+                testament: testament,
+                bookFilter: bookFilter,
+                exact: exact
+            )
+        }
+
         var out = [SearchResult]()
         var db: OpaquePointer?
         guard sqlite3_open_v2(path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else { return out }
@@ -411,7 +441,7 @@ struct SearchView: View {
                 let book    = Int(sqlite3_column_int(stmt, 0))
                 let chapter = Int(sqlite3_column_int(stmt, 1))
                 let verse   = Int(sqlite3_column_int(stmt, 2))
-                let raw     = sqlite3_column_text(stmt, 3).map { String(cString: $0) } ?? ""
+                let raw     = columnString(stmt, index: 3, filePath: path) ?? ""
                 guard !raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
                 let clean    = cleanText(raw)
                 // For exact phrase — verify after stripping markup
@@ -421,12 +451,75 @@ struct SearchView: View {
                     reference: "\(bookName) \(chapter):\(verse)",
                     snippet: makeSnippet(clean, matching: query),
                     moduleName: moduleName,
-                    bookNumber: book, chapter: chapter, verse: verse, noteID: nil))
+                    bookNumber: book, chapter: chapter, verse: verse, noteID: nil,
+                    modulePath: path, lookupQuery: nil, referenceKind: nil))
             }
             sqlite3_finalize(stmt)
             if bookFilter > 0 { break }  // single book, no need to run second range
         }
+
         out.sort { ($0.bookNumber, $0.chapter, $0.verse) < ($1.bookNumber, $1.chapter, $1.verse) }
+        return out
+    }
+
+    private func searchBibleFallback(db: OpaquePointer?,
+                                     path: String,
+                                     query: String,
+                                     moduleName: String,
+                                     testament: Testament,
+                                     bookFilter: Int,
+                                     exact: Bool) -> [SearchResult] {
+        guard let db else { return [] }
+        var out = [SearchResult]()
+
+        let ranges: [(Int, Int)]
+        switch testament {
+        case .ot:   ranges = [(10, 469)]
+        case .nt:   ranges = [(470, 999)]
+        case .both: ranges = [(10, 469), (470, 999)]
+        }
+
+        for (lo, hi) in ranges {
+            let bookClause = bookFilter > 0
+                ? "AND book_number = \(bookFilter)"
+                : "AND book_number BETWEEN \(lo) AND \(hi)"
+            let sql = "SELECT book_number, chapter, verse, text FROM verses WHERE 1 = 1 \(bookClause) ORDER BY book_number, chapter, verse"
+
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { continue }
+            defer { sqlite3_finalize(stmt) }
+
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                let book = Int(sqlite3_column_int(stmt, 0))
+                let chapter = Int(sqlite3_column_int(stmt, 1))
+                let verse = Int(sqlite3_column_int(stmt, 2))
+                let raw = columnString(stmt, index: 3, filePath: path) ?? ""
+                let clean = cleanText(raw)
+                guard !clean.isEmpty,
+                      clean.localizedCaseInsensitiveContains(query) else { continue }
+                if exact && !clean.localizedCaseInsensitiveContains(query) { continue }
+
+                let bookName = myBibleBookNumbers[book] ?? "Book \(book)"
+                out.append(SearchResult(
+                    type: .bible,
+                    reference: "\(bookName) \(chapter):\(verse)",
+                    snippet: makeSnippet(clean, matching: query),
+                    moduleName: moduleName,
+                    bookNumber: book,
+                    chapter: chapter,
+                    verse: verse,
+                    noteID: nil,
+                    modulePath: path,
+                    lookupQuery: nil,
+                    referenceKind: nil
+                ))
+
+                if out.count >= 300 { return out }
+            }
+
+            if bookFilter > 0 { break }
+        }
+
         return out
     }
 
@@ -434,6 +527,10 @@ struct SearchView: View {
 
     private func searchCommentary(path: String, query: String,
                                    moduleName: String, exact: Bool) -> [SearchResult] {
+        if path.hasSuffix(".graphe") {
+            return searchCommentaryFallback(path: path, query: query, moduleName: moduleName, exact: exact)
+        }
+
         var out = [SearchResult]()
         var db: OpaquePointer?
         guard sqlite3_open_v2(path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else { return out }
@@ -452,7 +549,7 @@ struct SearchView: View {
                 let book    = Int(sqlite3_column_int(stmt, 0))
                 let chapter = Int(sqlite3_column_int(stmt, 1))
                 let verse   = Int(sqlite3_column_int(stmt, 2))
-                let raw     = sqlite3_column_text(stmt, 3).map { String(cString: $0) } ?? ""
+                let raw     = columnString(stmt, index: 3, filePath: path) ?? ""
                 guard !raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
                 let clean    = cleanText(raw)
                 if exact && !clean.localizedCaseInsensitiveContains(query) { continue }
@@ -461,11 +558,171 @@ struct SearchView: View {
                     reference: "\(bookName) \(chapter):\(verse)",
                     snippet: makeSnippet(clean, matching: query),
                     moduleName: moduleName,
-                    bookNumber: book, chapter: chapter, verse: verse, noteID: nil))
+                    bookNumber: book, chapter: chapter, verse: verse, noteID: nil,
+                    modulePath: path, lookupQuery: nil, referenceKind: nil))
             }
             sqlite3_finalize(stmt)
             if !out.isEmpty { break }
         }
+        return out
+    }
+
+    private func searchReference(path: String, query: String,
+                                 moduleName: String, exact: Bool) -> [SearchResult] {
+        if path.hasSuffix(".graphe") {
+            return searchReferenceFallback(path: path, query: query, moduleName: moduleName, exact: exact)
+        }
+
+        var out = [SearchResult]()
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else { return out }
+        defer { sqlite3_close(db) }
+
+        let moduleType = myBible.visibleModules.first(where: { $0.filePath == path })?.type
+        let referenceKind: SearchResult.ReferenceKind = moduleType == .encyclopedia ? .encyclopedia : .dictionary
+        let sql = """
+        SELECT topic, definition
+        FROM dictionary
+        WHERE topic LIKE ? OR definition LIKE ?
+        ORDER BY CASE WHEN topic LIKE ? THEN 0 ELSE 1 END, topic
+        LIMIT 150
+        """
+
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return out }
+        defer { sqlite3_finalize(stmt) }
+
+        let fuzzyPattern = "%\(query)%"
+        let topicPrefixPattern = "\(query)%"
+        sqlite3_bind_text(stmt, 1, fuzzyPattern, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_text(stmt, 2, fuzzyPattern, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_text(stmt, 3, topicPrefixPattern, -1, SQLITE_TRANSIENT)
+
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let topic = columnString(stmt, index: 0, filePath: path) ?? ""
+            let raw = columnString(stmt, index: 1, filePath: path) ?? ""
+            let clean = cleanText(raw)
+            if exact,
+               !topic.localizedCaseInsensitiveContains(query),
+               !clean.localizedCaseInsensitiveContains(query) {
+                continue
+            }
+
+            let snippetSource = clean.isEmpty ? topic : clean
+            out.append(SearchResult(
+                type: .reference,
+                reference: topic,
+                snippet: makeSnippet(snippetSource, matching: query),
+                moduleName: moduleName,
+                bookNumber: 0,
+                chapter: 0,
+                verse: 0,
+                noteID: nil,
+                modulePath: path,
+                lookupQuery: topic,
+                referenceKind: referenceKind
+            ))
+        }
+
+        return out
+    }
+
+    private func searchCommentaryFallback(path: String, query: String,
+                                          moduleName: String, exact: Bool) -> [SearchResult] {
+        guard let db = openDatabase(at: path) else { return [] }
+        defer { sqlite3_close(db) }
+
+        let sqls = [
+            "SELECT book_number, chapter_number_from, verse_number_from, text FROM commentaries LIMIT 2000",
+            "SELECT book_number, chapter, verse, text FROM commentary LIMIT 2000",
+        ]
+        var out = [SearchResult]()
+
+        for sql in sqls {
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+                sqlite3_finalize(stmt)
+                continue
+            }
+            defer { sqlite3_finalize(stmt) }
+
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                let book = Int(sqlite3_column_int(stmt, 0))
+                let chapter = Int(sqlite3_column_int(stmt, 1))
+                let verse = Int(sqlite3_column_int(stmt, 2))
+                let raw = columnString(stmt, index: 3, filePath: path) ?? ""
+                let clean = cleanText(raw)
+                guard !clean.isEmpty,
+                      clean.localizedCaseInsensitiveContains(query) else { continue }
+                if exact && !clean.localizedCaseInsensitiveContains(query) { continue }
+
+                let bookName = myBibleBookNumbers[book] ?? "Book \(book)"
+                out.append(SearchResult(
+                    type: .commentary,
+                    reference: "\(bookName) \(chapter):\(verse)",
+                    snippet: makeSnippet(clean, matching: query),
+                    moduleName: moduleName,
+                    bookNumber: book,
+                    chapter: chapter,
+                    verse: verse,
+                    noteID: nil,
+                    modulePath: path,
+                    lookupQuery: nil,
+                    referenceKind: nil
+                ))
+                if out.count >= 200 { return out }
+            }
+
+            if !out.isEmpty { break }
+        }
+
+        return out
+    }
+
+    private func searchReferenceFallback(path: String, query: String,
+                                         moduleName: String, exact: Bool) -> [SearchResult] {
+        guard let db = openDatabase(at: path) else { return [] }
+        defer { sqlite3_close(db) }
+
+        let moduleType = myBible.visibleModules.first(where: { $0.filePath == path })?.type
+        let referenceKind: SearchResult.ReferenceKind = moduleType == .encyclopedia ? .encyclopedia : .dictionary
+        let sql = "SELECT topic, definition FROM dictionary LIMIT 4000"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+        defer { sqlite3_finalize(stmt) }
+
+        var out = [SearchResult]()
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let topic = columnString(stmt, index: 0, filePath: path) ?? ""
+            let raw = columnString(stmt, index: 1, filePath: path) ?? ""
+            let clean = cleanText(raw)
+            guard topic.localizedCaseInsensitiveContains(query) || clean.localizedCaseInsensitiveContains(query) else {
+                continue
+            }
+            if exact &&
+                !topic.localizedCaseInsensitiveContains(query) &&
+                !clean.localizedCaseInsensitiveContains(query) {
+                continue
+            }
+
+            let snippetSource = clean.isEmpty ? topic : clean
+            out.append(SearchResult(
+                type: .reference,
+                reference: topic,
+                snippet: makeSnippet(snippetSource, matching: query),
+                moduleName: moduleName,
+                bookNumber: 0,
+                chapter: 0,
+                verse: 0,
+                noteID: nil,
+                modulePath: path,
+                lookupQuery: topic,
+                referenceKind: referenceKind
+            ))
+
+            if out.count >= 150 { return out }
+        }
+
         return out
     }
 
@@ -488,8 +745,32 @@ struct SearchView: View {
                 snippet: makeSnippet(text, matching: query),
                 moduleName: "Notes",
                 bookNumber: note.bookNumber, chapter: note.chapterNumber,
-                verse: 0, noteID: note.id)
+                verse: 0, noteID: note.id,
+                modulePath: nil, lookupQuery: nil, referenceKind: nil)
         }
+    }
+
+    private func selectedReferenceModules() -> [MyBibleModule] {
+        var modules: [MyBibleModule] = []
+        if let dictionary = myBible.selectedDictionary,
+           myBible.visibleModules.contains(dictionary) {
+            modules.append(dictionary)
+        }
+        if let encyclopedia = myBible.selectedEncyclopedia,
+           myBible.visibleModules.contains(encyclopedia),
+           !modules.contains(encyclopedia) {
+            modules.append(encyclopedia)
+        }
+        if modules.isEmpty {
+            if let dictionary = referenceModules.first(where: { $0.type == .dictionary }) {
+                modules.append(dictionary)
+            }
+            if let encyclopedia = referenceModules.first(where: { $0.type == .encyclopedia }),
+               !modules.contains(encyclopedia) {
+                modules.append(encyclopedia)
+            }
+        }
+        return modules
     }
 
     // MARK: - Text cleaning
@@ -499,7 +780,74 @@ struct SearchView: View {
         while let o = t.range(of: "<S>"), let c = t.range(of: "</S>", range: o.lowerBound..<t.endIndex) {
             t.removeSubrange(o.lowerBound..<c.upperBound)
         }
-        return StrongsParser.stripAllTags(t)
+        return decodeHTMLEntities(StrongsParser.stripAllTags(t))
+    }
+
+    private func openDatabase(at path: String) -> OpaquePointer? {
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
+            sqlite3_close(db)
+            return nil
+        }
+        return db
+    }
+
+    private func columnString(_ stmt: OpaquePointer?, index: Int32, filePath: String) -> String? {
+        let type = sqlite3_column_type(stmt, index)
+        switch type {
+        case SQLITE_BLOB:
+            let length = sqlite3_column_bytes(stmt, index)
+            let blob = sqlite3_column_blob(stmt, index)?.assumingMemoryBound(to: UInt8.self)
+            return grapheDecrypt(blob, length, filePath: filePath)
+        case SQLITE_TEXT:
+            if filePath.hasSuffix(".graphe") {
+                let length = sqlite3_column_bytes(stmt, index)
+                let blob = sqlite3_column_blob(stmt, index)?.assumingMemoryBound(to: UInt8.self)
+                return grapheDecrypt(blob, length, filePath: filePath)
+            }
+            return sqlite3_column_text(stmt, index).map { String(cString: $0) }
+        default:
+            return nil
+        }
+    }
+
+    private func decodeHTMLEntities(_ input: String) -> String {
+        var s = input
+        let namedEntities: [String: String] = [
+            "&nbsp;": " ",
+            "&amp;": "&",
+            "&lt;": "<",
+            "&gt;": ">",
+            "&quot;": "\"",
+            "&apos;": "'"
+        ]
+        for (entity, replacement) in namedEntities {
+            s = s.replacingOccurrences(of: entity, with: replacement)
+        }
+
+        let pattern = #"&#(x?[0-9A-Fa-f]+);"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return s }
+        let nsString = s as NSString
+        let matches = regex.matches(in: s, range: NSRange(location: 0, length: nsString.length)).reversed()
+        var result = s
+
+        for match in matches {
+            let token = nsString.substring(with: match.range(at: 1))
+            let scalarValue: UInt32?
+            if token.lowercased().hasPrefix("x") {
+                scalarValue = UInt32(token.dropFirst(), radix: 16)
+            } else {
+                scalarValue = UInt32(token, radix: 10)
+            }
+
+            guard let scalarValue,
+                  let scalar = UnicodeScalar(scalarValue) else { continue }
+            let replacement = String(scalar)
+            let range = Range(match.range, in: result)!
+            result.replaceSubrange(range, with: replacement)
+        }
+
+        return result
     }
 
     // MARK: - Navigation
@@ -514,6 +862,31 @@ struct SearchView: View {
             NotificationCenter.default.post(name: .navigateToCommentary, object: nil,
                 userInfo: ["bookNumber": result.bookNumber, "chapter": result.chapter,
                            "moduleName": result.moduleName])
+        case .reference:
+            guard let modulePath = result.modulePath,
+                  let lookupQuery = result.lookupQuery else { return }
+            NotificationCenter.default.post(name: Notification.Name("switchToBibleTab"), object: nil)
+            if result.referenceKind == .encyclopedia {
+                if let module = myBible.visibleModules.first(where: { $0.filePath == modulePath }) {
+                    myBible.selectedEncyclopedia = module
+                }
+                UserDefaults.standard.set(CompanionMode.encyclopedia.rawValue, forKey: "companionMode")
+                NotificationCenter.default.post(
+                    name: Notification.Name("lookupEncyclopediaWord"),
+                    object: nil,
+                    userInfo: ["word": lookupQuery]
+                )
+            } else {
+                if let module = myBible.visibleModules.first(where: { $0.filePath == modulePath }) {
+                    myBible.selectedDictionary = module
+                }
+                UserDefaults.standard.set(CompanionMode.strongs.rawValue, forKey: "companionMode")
+                NotificationCenter.default.post(
+                    name: Notification.Name("lookupDictionaryWord"),
+                    object: nil,
+                    userInfo: ["word": lookupQuery]
+                )
+            }
         case .notes:
             if let id = result.noteID {
                 notesManager.searchHighlight = effectiveQuery

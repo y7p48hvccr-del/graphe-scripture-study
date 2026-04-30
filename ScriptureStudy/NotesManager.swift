@@ -19,13 +19,20 @@ class NotesManager: ObservableObject {
 
     // MARK: - Storage
 
+    private let storageDirectoryOverride: URL?
+    private let remoteSyncEnabled: Bool
+
     /// iCloud ubiquitous container URL if available, else local Documents
     private var notesDirectory: URL {
+        if let storageDirectoryOverride {
+            return storageDirectoryOverride
+        }
         if let icloud = iCloudDirectory { return icloud }
         return localDirectory
     }
 
     private var iCloudDirectory: URL? {
+        guard storageDirectoryOverride == nil, remoteSyncEnabled else { return nil }
         guard let container = FileManager.default.url(
             forUbiquityContainerIdentifier: "iCloud.com.scripturetstudy.app"
         ) else { return nil }
@@ -50,8 +57,20 @@ class NotesManager: ObservableObject {
 
     // MARK: - Init
 
-    init() {
+    init(
+        storageDirectoryOverride: URL? = nil,
+        remoteSyncEnabled: Bool = true
+    ) {
+        self.storageDirectoryOverride = storageDirectoryOverride
+        self.remoteSyncEnabled = remoteSyncEnabled
+        if let storageDirectoryOverride {
+            try? FileManager.default.createDirectory(
+                at: storageDirectoryOverride,
+                withIntermediateDirectories: true
+            )
+        }
         load()
+        guard remoteSyncEnabled else { return }
         migrateLocalNotesToiCloudIfNeeded()
         startMetadataQuery()
     }
@@ -119,6 +138,7 @@ class NotesManager: ObservableObject {
         let coordinator = NSFileCoordinator()
         var error: NSError?
         var loaded: [Note] = []
+        var repaired: [Note] = []
 
         coordinator.coordinate(readingItemAt: notesDirectory,
                                 options: .withoutChanges,
@@ -137,7 +157,12 @@ class NotesManager: ObservableObject {
                     guard let text = try? String(contentsOf: fileURL, encoding: .utf8) else {
                         return nil
                     }
-                    return Note.parse(from: text)
+                    guard let parsed = Note.parse(from: text) else { return nil }
+                    let repairedNote = repairVerseLinkIfNeeded(parsed)
+                    if repairedNote != parsed {
+                        repaired.append(repairedNote)
+                    }
+                    return repairedNote
                 }
                 .sorted { $0.updatedAt > $1.updatedAt }
         }
@@ -150,6 +175,10 @@ class NotesManager: ObservableObject {
         } else {
             selectedNote = notes.first
         }
+
+        for note in repaired {
+            persistRepair(note)
+        }
     }
 
     // MARK: - Save
@@ -157,7 +186,6 @@ class NotesManager: ObservableObject {
     func save(_ note: Note) {
         var updated       = note
         updated.updatedAt = Date()
-        print("[NOTE DEBUG] save() called for id=\(note.id), notes.count BEFORE = \(notes.count)")
 
         let coordinator = NSFileCoordinator()
         var error: NSError?
@@ -166,7 +194,6 @@ class NotesManager: ObservableObject {
         removeFile(for: note.id, coordinator: coordinator)
 
         let url = uniqueURL(for: updated)
-        print("[NOTE DEBUG] save() writing to url = \(url.lastPathComponent)")
 
         coordinator.coordinate(writingItemAt: url,
                                 options: .forReplacing,
@@ -175,25 +202,21 @@ class NotesManager: ObservableObject {
                 try updated.fileText.write(to: writeURL,
                                            atomically: true,
                                            encoding: .utf8)
-                print("[NOTE DEBUG] save() wrote file successfully")
             } catch {
-                print("[NOTE DEBUG] save() FILE WRITE FAILED: \(error)")
+                print("Notes save failed: \(error)")
             }
         }
         if let err = error {
-            print("[NOTE DEBUG] save() coordinator error: \(err)")
+            print("Notes coordinator error: \(err)")
         }
 
-        if let idx = notes.firstIndex(where: { $0.id == note.id }) {
-            notes[idx] = updated
-            print("[NOTE DEBUG] save() updated existing at index \(idx)")
-        } else {
-            notes.insert(updated, at: 0)
-            print("[NOTE DEBUG] save() inserted new at index 0")
-        }
-        notes.sort { $0.updatedAt > $1.updatedAt }
-        print("[NOTE DEBUG] save() complete, notes.count AFTER = \(notes.count)")
-        if selectedNote?.id == note.id { selectedNote = updated }
+        upsertInMemory(updated)
+    }
+
+    func stage(_ note: Note) {
+        var staged = note
+        staged.updatedAt = Date()
+        upsertInMemory(staged)
     }
 
     // MARK: - Create
@@ -207,11 +230,10 @@ class NotesManager: ObservableObject {
         note.chapterNumber = chapter
         note.verseNumbers  = verses
         if bookNumber > 0 { note.title = note.verseReference }
-        print("[NOTE DEBUG] NotesManager.createNote building note id=\(note.id) title=\(note.title)")
         save(note)
-        print("[NOTE DEBUG] NotesManager.createNote after save(), notes.count=\(notes.count)")
-        selectedNote = note
-        return note
+        let created = notes.first(where: { $0.id == note.id }) ?? note
+        selectedNote = created
+        return created
     }
 
     // MARK: - Delete / Archive / Trash
@@ -233,7 +255,13 @@ class NotesManager: ObservableObject {
         updated.deletedAt = Date()
         save(updated)
         if selectedNote?.id == note.id {
-            selectedNote = nil
+            selectedNote = notes.first(where: {
+                $0.id != note.id && $0.deletedAt == nil && !$0.isArchived
+            }) ?? notes.first(where: {
+                $0.id != note.id && $0.deletedAt == nil
+            }) ?? notes.first(where: {
+                $0.id != note.id
+            })
         }
     }
 
@@ -351,6 +379,18 @@ class NotesManager: ObservableObject {
         }
     }
 
+    private func upsertInMemory(_ note: Note) {
+        if let idx = notes.firstIndex(where: { $0.id == note.id }) {
+            notes[idx] = note
+        } else {
+            notes.insert(note, at: 0)
+        }
+        notes.sort { $0.updatedAt > $1.updatedAt }
+        if selectedNote?.id == note.id {
+            selectedNote = note
+        }
+    }
+
     private func uniqueURL(for note: Note) -> URL {
         let base = note.safeFilename
         var url  = notesDirectory.appendingPathComponent("\(base).txt")
@@ -362,5 +402,72 @@ class NotesManager: ObservableObject {
             n  += 1
         }
         return url
+    }
+
+    private func repairVerseLinkIfNeeded(_ note: Note) -> Note {
+        let references = parseVerseReferences(text: note.title)
+        guard let first = references.first,
+              !first.book.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              let parsedBookNumber = bookNumber(for: first.book) else { return note }
+
+        let verses = expandVerseList(first.verse)
+        guard !verses.isEmpty else { return note }
+
+        let needsRepair =
+            note.bookNumber != parsedBookNumber ||
+            note.chapterNumber != first.chapter ||
+            note.verseNumbers != verses
+
+        guard needsRepair else { return note }
+
+        var repaired = note
+        repaired.bookNumber = parsedBookNumber
+        repaired.chapterNumber = first.chapter
+        repaired.verseNumbers = verses
+        return repaired
+    }
+
+    private func persistRepair(_ note: Note) {
+        let coordinator = NSFileCoordinator()
+        var error: NSError?
+        removeFile(for: note.id, coordinator: coordinator)
+        let url = uniqueURL(for: note)
+
+        coordinator.coordinate(writingItemAt: url,
+                               options: .forReplacing,
+                               error: &error) { writeURL in
+            try? note.fileText.write(to: writeURL, atomically: true, encoding: .utf8)
+        }
+    }
+
+    private func bookNumber(for bookName: String) -> Int? {
+        let normalized = normalizeBookName(bookName)
+        return myBibleBookNumbers.first(where: { normalizeBookName($0.value) == normalized })?.key
+    }
+
+    private func normalizeBookName(_ bookName: String) -> String {
+        bookName
+            .replacingOccurrences(of: ".", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+    }
+
+    private func expandVerseList(_ text: String) -> [Int] {
+        text
+            .split(separator: ",")
+            .flatMap { component -> [Int] in
+                let trimmed = component.trimmingCharacters(in: .whitespacesAndNewlines)
+                let parts = trimmed.components(separatedBy: CharacterSet(charactersIn: "-–"))
+                if parts.count == 2,
+                   let start = Int(parts[0]),
+                   let end = Int(parts[1]),
+                   start <= end {
+                    return Array(start...end)
+                }
+                if let verse = Int(trimmed) {
+                    return [verse]
+                }
+                return []
+            }
     }
 }

@@ -10,19 +10,15 @@ import SwiftUI
 
 // MARK: - Verse ref navigation helper
 
-/// Parses "Exod 14", "Matt 27:33-37", "Acts 9:1-7" etc. and posts
-/// the navigateToPassage notification that LocalBibleView expects.
-private func navigateToVerseRef(_ ref: String) {
-    guard let (bn, ch, vs) = parseVerseRef(ref) else {
+private func verseLinkTarget(from ref: String) -> VerseLinkTarget? {
+    guard let (bn, ch, verseStart, verseEnd) = parseVerseRef(ref), verseStart > 0 else {
         print("[BMaps] Could not parse verse ref: \(ref)")
-        return
+        return nil
     }
-    var info: [String: Any] = ["bookNumber": bn, "chapter": ch]
-    if vs > 0 { info["verse"] = vs }
-    NotificationCenter.default.post(name: .navigateToPassage, object: nil, userInfo: info)
+    return VerseLinkTarget(bookNumber: bn, chapter: ch, verseStart: verseStart, verseEnd: verseEnd)
 }
 
-private func parseVerseRef(_ ref: String) -> (bookNumber: Int, chapter: Int, verse: Int)? {
+private func parseVerseRef(_ ref: String) -> (bookNumber: Int, chapter: Int, verseStart: Int, verseEnd: Int)? {
     // Split "Exod 14" or "Matt 27:33-37" into abbr + reference
     let parts = ref.trimmingCharacters(in: .whitespaces).components(separatedBy: " ")
     guard parts.count >= 2 else { return nil }
@@ -35,14 +31,15 @@ private func parseVerseRef(_ ref: String) -> (bookNumber: Int, chapter: Int, ver
     let cv = chapVerse.components(separatedBy: ":")
     guard let chapter = Int(cv[0].trimmingCharacters(in: .whitespaces)) else { return nil }
 
-    var verse = 0
+    var verseStart = 0
+    var verseEnd = 0
     if cv.count >= 2 {
-        // Take only the first number before any dash
-        let verseStr = cv[1].components(separatedBy: CharacterSet(charactersIn: "-–")).first ?? ""
-        verse = Int(verseStr.trimmingCharacters(in: .whitespaces)) ?? 0
+        let verseParts = cv[1].components(separatedBy: CharacterSet(charactersIn: "-–"))
+        verseStart = Int(verseParts.first?.trimmingCharacters(in: .whitespaces) ?? "") ?? 0
+        verseEnd = verseParts.count > 1 ? (Int(verseParts[1].trimmingCharacters(in: .whitespaces)) ?? verseStart) : verseStart
     }
 
-    return (bookNum, chapter, verse)
+    return (bookNum, chapter, verseStart, verseEnd)
 }
 
 /// Abbreviation → MyBible book number (same numbering as osisBookName in CompanionPanel)
@@ -191,9 +188,16 @@ struct BibleMapsView: View {
             Spacer()
             Image(systemName: "map").font(.system(size: 36)).foregroundStyle(.quaternary)
             Text("Bible Maps module not loaded").font(.callout).foregroundStyle(.secondary)
-            Text("Add BMaps.dictionary.SQLite3 to your modules folder.")
+            Text("Add a compatible atlas module to your modules folder.")
                 .font(.caption).foregroundStyle(.secondary)
                 .multilineTextAlignment(.center).padding(.horizontal)
+            if let loadedPath = bmapsService.loadedAtlasURL?.path {
+                Text(loadedPath)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal)
+            }
             Spacer()
         }
         .frame(maxWidth: .infinity).background(theme.background)
@@ -262,6 +266,7 @@ struct MapDetailView: View {
     @State private var navigatedMap:     BibleMap? = nil
     @State private var mapContentHeight: CGFloat  = 400
     @StateObject private var mapController = MapWebController()
+    @State private var selectedVerseTarget: VerseLinkTarget? = nil
 
     private var displayMap: BibleMap { navigatedMap ?? map }
 
@@ -303,6 +308,8 @@ struct MapDetailView: View {
                                 if let target = bmapsService.maps.first(where: { $0.id == mapID }) {
                                     navigatedMap = target
                                 }
+                            } onBibleRef: { bookNumber, chapter, verseStart, verseEnd in
+                                selectedVerseTarget = VerseLinkTarget(bookNumber: bookNumber, chapter: chapter, verseStart: verseStart, verseEnd: verseEnd)
                             }
                             .frame(height: mapContentHeight)
                             .frame(maxWidth: .infinity)
@@ -352,6 +359,24 @@ struct MapDetailView: View {
             }
         }
         .background(theme.background)
+        .popover(item: $selectedVerseTarget, arrowEdge: .bottom) { target in
+            VersePreviewPopover(
+                bookNumber: target.bookNumber,
+                chapter: target.chapter,
+                verseStart: target.verseStart,
+                verseEnd: target.verseEnd,
+                accent: filigreeAccent,
+                onOpenInBible: {
+                    NotificationCenter.default.post(
+                        name: .navigateToPassage,
+                        object: nil,
+                        userInfo: ["bookNumber": target.bookNumber, "chapter": target.chapter, "verse": target.verseStart]
+                    )
+                    selectedVerseTarget = nil
+                }
+            )
+            .frame(width: 320)
+        }
     }
 }
 
@@ -445,9 +470,10 @@ struct MapHTMLView: WKViewRepresentable {
     let controller: MapWebController
     @Binding var contentHeight: CGFloat
     var onMapLink: ((String) -> Void)? = nil
+    var onBibleRef: ((Int, Int, Int, Int) -> Void)? = nil
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(contentHeight: $contentHeight, onMapLink: onMapLink)
+        Coordinator(contentHeight: $contentHeight, onMapLink: onMapLink, onBibleRef: onBibleRef)
     }
 
     #if os(macOS)
@@ -470,6 +496,7 @@ struct MapHTMLView: WKViewRepresentable {
 
     private func updateWebView(_ wv: WKWebView, context: Context) {
         context.coordinator.onMapLink     = onMapLink
+        context.coordinator.onBibleRef    = onBibleRef
         context.coordinator.contentHeight = $contentHeight
         wv.loadHTMLString(html, baseURL: nil)
     }
@@ -477,10 +504,12 @@ struct MapHTMLView: WKViewRepresentable {
     class Coordinator: NSObject, WKNavigationDelegate {
         var contentHeight: Binding<CGFloat>
         var onMapLink: ((String) -> Void)?
+        var onBibleRef: ((Int, Int, Int, Int) -> Void)?
 
-        init(contentHeight: Binding<CGFloat>, onMapLink: ((String) -> Void)?) {
+        init(contentHeight: Binding<CGFloat>, onMapLink: ((String) -> Void)?, onBibleRef: ((Int, Int, Int, Int) -> Void)?) {
             self.contentHeight = contentHeight
             self.onMapLink     = onMapLink
+            self.onBibleRef    = onBibleRef
         }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
@@ -548,15 +577,16 @@ struct MapHTMLView: WKViewRepresentable {
             guard parts.count >= 2, let bookNum = Int(parts[0]) else { return }
             let cv = parts[1...].joined().components(separatedBy: ":")
             guard let chapter = Int(cv[0].trimmingCharacters(in: .whitespaces)) else { return }
-            var verse = 0
+            var verseStart = 0
+            var verseEnd = 0
             if cv.count >= 2 {
-                verse = Int(cv[1].components(separatedBy: CharacterSet(charactersIn: "-–")).first?
-                    .trimmingCharacters(in: .whitespaces) ?? "") ?? 0
+                let verseParts = cv[1].components(separatedBy: CharacterSet(charactersIn: "-–"))
+                verseStart = Int(verseParts.first?.trimmingCharacters(in: .whitespaces) ?? "") ?? 0
+                verseEnd = verseParts.count > 1 ? (Int(verseParts[1].trimmingCharacters(in: .whitespaces)) ?? verseStart) : verseStart
             }
-            var info: [String: Any] = ["bookNumber": bookNum, "chapter": chapter]
-            if verse > 0 { info["verse"] = verse }
+            guard verseStart > 0 else { return }
             DispatchQueue.main.async {
-                NotificationCenter.default.post(name: .navigateToPassage, object: nil, userInfo: info)
+                self.onBibleRef?(bookNum, chapter, verseStart, verseEnd)
             }
         }
     }
@@ -570,6 +600,7 @@ struct MapPlaceRow: View {
     let filigreeAccent: Color
     let resolvedFont:   Font
     @State private var isExpanded = false
+    @State private var selectedVerseTarget: VerseLinkTarget? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -598,7 +629,7 @@ struct MapPlaceRow: View {
                 VStack(alignment: .leading, spacing: 2) {
                     ForEach(place.verseRefs, id: \.self) { ref in
                         Button {
-                            navigateToVerseRef(ref)
+                            selectedVerseTarget = verseLinkTarget(from: ref)
                         } label: {
                             HStack(spacing: 6) {
                                 Image(systemName: "book.closed")
@@ -617,6 +648,24 @@ struct MapPlaceRow: View {
                 .background(filigreeAccent.opacity(0.05))
                 .transition(.opacity.combined(with: .move(edge: .top)))
             }
+        }
+        .popover(item: $selectedVerseTarget, arrowEdge: .bottom) { target in
+            VersePreviewPopover(
+                bookNumber: target.bookNumber,
+                chapter: target.chapter,
+                verseStart: target.verseStart,
+                verseEnd: target.verseEnd,
+                accent: filigreeAccent,
+                onOpenInBible: {
+                    NotificationCenter.default.post(
+                        name: .navigateToPassage,
+                        object: nil,
+                        userInfo: ["bookNumber": target.bookNumber, "chapter": target.chapter, "verse": target.verseStart]
+                    )
+                    selectedVerseTarget = nil
+                }
+            )
+            .frame(width: 320)
         }
     }
 }
@@ -694,6 +743,7 @@ struct PlaceEntryRow: View {
     let resolvedFont:      Font
     var onSelectMap:       (BibleMap) -> Void
     @State private var isExpanded = false
+    @State private var selectedVerseTarget: VerseLinkTarget? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -743,7 +793,7 @@ struct PlaceEntryRow: View {
                         Divider().padding(.horizontal, 24).padding(.vertical, 2)
                         ForEach(verses, id: \.self) { ref in
                             Button {
-                                navigateToVerseRef(ref)
+                                selectedVerseTarget = verseLinkTarget(from: ref)
                             } label: {
                                 HStack(spacing: 6) {
                                     Image(systemName: "book.closed")
@@ -764,6 +814,23 @@ struct PlaceEntryRow: View {
                 .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
+        .popover(item: $selectedVerseTarget, arrowEdge: .bottom) { target in
+            VersePreviewPopover(
+                bookNumber: target.bookNumber,
+                chapter: target.chapter,
+                verseStart: target.verseStart,
+                verseEnd: target.verseEnd,
+                accent: filigreeAccent,
+                onOpenInBible: {
+                    NotificationCenter.default.post(
+                        name: .navigateToPassage,
+                        object: nil,
+                        userInfo: ["bookNumber": target.bookNumber, "chapter": target.chapter, "verse": target.verseStart]
+                    )
+                    selectedVerseTarget = nil
+                }
+            )
+            .frame(width: 320)
+        }
     }
 }
-

@@ -5,17 +5,14 @@ enum RichNoteBridge {
         let lines = text.components(separatedBy: "\n")
         let blocks = lines.map(makeBlock)
         return RichNoteDocument(
-            plainText: normalizedPlainText(from: blocks),
+            plainText: canonicalPlainText(from: blocks),
             blocks: blocks,
             links: []
         )
     }
 
     static func plainText(from document: RichNoteDocument) -> String {
-        if !document.plainText.isEmpty {
-            return document.plainText
-        }
-        return normalizedPlainText(from: document.blocks)
+        canonicalPlainText(from: document.blocks)
     }
 
     static func migratedNote(from note: Note) -> Note {
@@ -33,6 +30,9 @@ enum RichNoteBridge {
         }
         if let bullet = parseBullet(line) {
             return bullet
+        }
+        if let numbered = parseNumbered(line) {
+            return numbered
         }
         return RichNoteBlock(kind: .paragraph, inlines: parseInlines(in: line))
     }
@@ -56,6 +56,26 @@ enum RichNoteBridge {
         return RichNoteBlock(
             kind: .bulletItem(depth: depth),
             inlines: parseInlines(in: String(trimmed.dropFirst(2)))
+        )
+    }
+
+    private static func parseNumbered(_ line: String) -> RichNoteBlock? {
+        let trimmed = line.drop { $0 == " " || $0 == "\t" }
+        let digits = trimmed.prefix { $0.isNumber }
+        guard !digits.isEmpty else { return nil }
+        let remainder = trimmed.dropFirst(digits.count)
+        let contentStart: String.Index
+        if remainder.hasPrefix(". ") {
+            contentStart = remainder.index(remainder.startIndex, offsetBy: 2)
+        } else if remainder.hasPrefix(" ") {
+            contentStart = remainder.index(after: remainder.startIndex)
+        } else {
+            return nil
+        }
+        let depth = max(0, (line.count - trimmed.count) / 2)
+        return RichNoteBlock(
+            kind: .numberedItem(depth: depth, ordinal: Int(digits)),
+            inlines: parseInlines(in: String(remainder[contentStart...]))
         )
     }
 
@@ -93,7 +113,7 @@ enum RichNoteBridge {
         return result.isEmpty ? [RichNoteInline(text: text)] : result
     }
 
-    private static func normalizedPlainText(from blocks: [RichNoteBlock]) -> String {
+    static func canonicalPlainText(from blocks: [RichNoteBlock]) -> String {
         blocks.map { block in
             let text = block.inlines.map(\.text).joined()
             switch block.kind {

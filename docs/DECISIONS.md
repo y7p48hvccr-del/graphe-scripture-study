@@ -97,3 +97,102 @@ Mid-session, `VerseWithStrongsView.swift` was accidentally deleted and was not i
 ### Follow-up 2026-04-22 morning: 7x mystery resolved
 
 The 7x `ContentView` reconstruction was caused by a conflict with the commentaries module interfering with the startup process. Resolved outside the diagnostic path we had been following, which explains why the `[STARTUP]` prints could not pinpoint it — the cause was in a code path we had not instrumented. No further action needed on this thread.
+
+---
+
+## 2026-04-22 (later) · Notes editor architecture, live scripture/Strong's linking, Bible toolbar identity
+
+This session moved the notes editor from "feature-rich text box" toward a proper semantic editor pipeline. The key decision was to keep rich note storage, editor rendering, and link semantics separated, then layer live markdown/link detection on top of that instead of collapsing everything back into plain text transforms.
+
+### Notes editor architecture
+
+The rich-notes path is now the real foundation:
+
+- `RichNoteDocument.swift` remains the structured storage model.
+- `RichNoteBridge.swift` and `RichNoteEditorBridge.swift` carry the round-trip between persisted note structure and the live AppKit editor.
+- `NoteTextEditor.swift` is responsible for editor-time transforms only: markdown rendering, block inference, inline styling, and auto-detected links.
+
+That separation mattered because it let scripture links, Strong's links, and future note links behave as typed targets rather than as fragile URL-looking strings embedded in plain text.
+
+### Live markdown/editor work completed
+
+Delivered the previously queued "Session 2 / Session 3" style work in one pass:
+
+- First-pass live markdown behavior landed in `NoteTextEditor.swift`.
+  - Headings render from markdown-style prefixes.
+  - Bullets and numbered lists normalize into the editor's block model.
+  - Inline `**bold**` / `*italic*` behavior now fits the same live-editing pipeline.
+- Numbered-list handling was normalized to `1. ` across the editor and bridge layers.
+  - This removed earlier disagreement between editor-time inference and document round-trip logic.
+  - `1 Corinthians ...` no longer risks being misread as a numbered list item.
+
+### Scripture + Strong's auto-linking
+
+Implemented live auto-detection and activation for scripture references and Strong's numbers inside notes:
+
+- Typing references like `John 3:16`, `1 Corinthians 13:4-7`, `G3056`, `H7225` now produces live links in the editor.
+- Clicking scripture links posts the existing `navigateToPassage` notification so the Bible panel opens the passage.
+- Clicking Strong's links routes into the existing Strong's flow and forces the Bible tab active first where needed.
+- `RichNoteEditorBridge.swift` now restores custom `grapheone-scripture`, `grapheone-strongs`, and note links back into typed `RichNoteLinkTarget` values instead of flattening them into plain URLs.
+
+### Hard bugs resolved during the linking work
+
+Several bugs turned out not to be parser design problems, but editor/runtime integration problems:
+
+- Editable `NSTextView` hover/click behavior:
+  - Custom hover/click handling now lives in `RichNoteTextView`.
+  - Hand cursor only appears over actual linked glyph bounds.
+  - Links remain clickable inside the editable note surface.
+- Hidden Unicode format characters in live note text:
+  - Runtime paragraph scans showed invisible `\\p{Cf}` characters inside references such as `1 Corinthians 13:4-7`.
+  - The scripture/Strong's regexes, book normalization, and verse-list parsing were hardened to tolerate and strip those format characters.
+  - This was the real blocker behind the "Corinthians doesn't link live" bug.
+
+### Scripture abbreviation hardening
+
+Expanded coverage beyond full book names:
+
+- Common abbreviations such as `Jn`, `Rom`, `Phil`, `Rev`, `Ps`, `Gen`, `Josh`, `Judg`, `Luk`, `Jam`, `Rv`, plus optional trailing periods, are now recognized.
+- Added alias normalization so abbreviation matching still resolves cleanly to canonical book names.
+- Deliberately excluded ambiguous shorthand such as `Co` and `Ti` to avoid false positives.
+- Verse-list parsing now also tolerates `;` separators in addition to commas.
+
+### Bible panel identity improvement
+
+The Bible reading toolbar now carries a compact active-book capsule to the left of the Bible picker in `LocalBibleView.swift`:
+
+- Shows current book name with chapter.
+- Uses the existing filigree accent language instead of introducing a new control style.
+- Replaced the earlier full-width header experiment, which looked good but spent too much vertical space in the reading pane.
+
+Decision: keep the compact capsule version. A future refinement can make that capsule itself the book picker and remove the separate book picker control, but that is polish work from a stable base, not something to force into the same session.
+
+### Validation
+
+Repeated validation throughout the session:
+
+- `NoteTextEditor.swift` diagnostics clean after each major pass where the tool cooperated.
+- `LocalBibleView.swift` built cleanly even when the per-file diagnostics tool intermittently failed.
+- Full project builds succeeded after the editor/linking work, scripture hardening, debug-log cleanup, and Bible toolbar changes.
+
+### Temporary debugging removed
+
+All `[NOTE DEBUG]` prints added during the live-link investigation were removed before session close.
+
+### Why this matters
+
+This was not just bug fixing. The editor now has the architecture needed for future semantic note features:
+
+- note-to-note links
+- insert-passage workflows
+- richer markdown coverage
+- multi-verse highlight behavior in the Bible panel
+- cleaner Bible/Strong's/editor interoperability
+
+The cost of future editor capability should now go down instead of up.
+
+### Backlog carried forward
+
+- Make the active-book capsule double as the book picker and retire the duplicate adjacent book control.
+- Multi-verse highlight rendering in the Bible panel when a note link targets a verse range such as `1 Corinthians 13:4-7`.
+- Continue scripture abbreviation coverage only if real-world misses appear; avoid making the matcher so broad that false positives rise.

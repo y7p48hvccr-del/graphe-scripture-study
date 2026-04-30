@@ -5,22 +5,11 @@
 <p class="subtitle">Historical maps and geographic place lookup</p>
 
 <h2>Overview</h2>
-<p>The Maps tab provides a Bible atlas with 15 historical maps covering the Old and New Testaments, plus an index of 358 named biblical places. Each place links to the maps it appears on, and each map lists the key locations with relevant scripture references.</p>
+<p>The Maps tab provides a Bible atlas and place lookup backed by a locally installed atlas module. The app reads the atlas from your modules folder rather than bundling a map database inside the application.</p>
 
-<h2>Installing the Maps module</h2>
-<p>The Maps tab requires <strong>BMaps.dictionary.SQLite3</strong> in your modules folder — the same folder selected in the Library tab. Once the file is there, the Maps tab loads automatically on the next launch.</p>
+<h2>Installing an atlas module</h2>
+<p>Place a compatible SQLite atlas module in your modules folder — the same folder selected in the Library tab. The Maps tab will attempt to load atlas modules with names such as <strong>BMaps</strong>, <strong>BibleMaps</strong>, <strong>BibleAtlas</strong>, or <strong>Atlas</strong>.</p>
 
-<h2>Browsing maps</h2>
-<p>The default view lists all 15 maps in order. Tap any map to open it. The map image loads at the top, followed by a list of named locations on that map. Tap any location to expand its verse references. Tap a verse reference to jump directly to that passage in the Bible panel.</p>
-
-<h2>Searching places</h2>
-<p>Tap the magnifying glass in the Maps tab header to search by place name. Type any biblical place — Jerusalem, Capernaum, Damascus — and matching entries appear with the maps they appear on and their associated verse references.</p>
-
-<h2>Verse context</h2>
-<p>When you tap a verse in the Bible panel, the Maps tab quietly checks whether any mapped places are associated with that verse. If it finds any, a badge appears at the top of the Maps tab showing how many places are nearby. Tapping the badge shows the relevant places without leaving the tab.</p>
-
-<h2>Map navigation</h2>
-<p>Each map has previous and next arrows for moving between maps in sequence. Tapping these navigates within the Maps tab itself without leaving the Companion Panel.</p>
-
-<div class="tip">Verse references shown under map locations are tappable — they open that passage directly in the main Bible panel.</div>
+<h2>Testing note</h2>
+<p>Atlas content is supplied by the module you install, so licensing and attribution requirements depend on that source. Confirm you have permission to distribute any atlas module beyond private testing.</p>
 </article></body></html>

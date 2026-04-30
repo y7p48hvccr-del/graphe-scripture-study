@@ -1,32 +1,30 @@
 import SwiftUI
 
-/// Right-hand panel of the Devotional page. Three stacked sections:
-///
-///   1. Plan picker (Menu)
-///   2. Today's reading — the plan's passage for today, with tappable
-///      verse references that load into the bottom preview
-///   3. Verse preview — the whole chapter for the tapped reference,
-///      scrolled so the tapped verse sits at the top. "Open in Bible →"
-///      button jumps to the Bible tab at that exact passage.
+/// Right-hand panel of the Devotional page. Shows the selected reading
+/// plan's passage for today as a scrollable list of verses.
 ///
 /// Stylistically matches DevotionalView exactly: same theme, same
 /// filigree accent, same typography via @AppStorage.
+///
+/// The passage header ("Romans 8:1–30" etc.) is shown as plain text.
+/// Individual verse numbers within the scrolling text are still tappable
+/// and jump to that specific verse.
 struct ReadingPlanPanel: View {
 
     @EnvironmentObject var myBible: MyBibleService
 
-    @AppStorage("themeID")           private var themeID:      String = "light"
-    @AppStorage("filigreeColor")     private var filigreeColor: Int   = 0
-    @AppStorage("fontSize")          private var fontSize:     Double = 16
-    @AppStorage("fontName")          private var fontName:     String = ""
-    @AppStorage("selectedPlanPath")  private var selectedPlanPath: String = ""
+    @AppStorage("themeID")          private var themeID:          String = "light"
+    @AppStorage("filigreeColor")    private var filigreeColor:    Int    = 0
+    @AppStorage("fontSize")         private var fontSize:         Double = 16
+    @AppStorage("fontName")         private var fontName:         String = ""
+    @AppStorage("selectedPlanPath") private var selectedPlanPath: String = ""
 
     var theme:              AppTheme { AppTheme.find(themeID) }
     var filigreeAccent:     Color    { resolvedFiligreeAccent(colorIndex: filigreeColor, themeID: themeID) }
     var filigreeAccentFill: Color    { resolvedFiligreeAccentFill(colorIndex: filigreeColor, themeID: themeID) }
 
-    /// Plan module resolved from the stored path. Nil when no plan picked
-    /// or when the user's chosen module is no longer installed.
+    /// Plan module resolved from the stored path. Nil when no plan is
+    /// picked or the chosen module is no longer installed.
     private var planModule: MyBibleModule? {
         myBible.modules.first { $0.filePath == selectedPlanPath && $0.type == .readingPlan }
     }
@@ -41,22 +39,13 @@ struct ReadingPlanPanel: View {
 
     // MARK: - Loaded state
 
-    /// Today's plan entry. Loaded when the plan is chosen or on appear.
     @State private var planEntry:    MyBibleService.PlanEntry? = nil
-    /// Verses of the plan's passage, rendered as a tappable list at the top.
     @State private var planVerses:   [MyBibleVerse] = []
     @State private var isLoadingPlan = false
-    /// The chapter loaded into the bottom preview panel (nil = nothing yet).
-    @State private var previewVerses: [MyBibleVerse] = []
-    @State private var previewBook:   Int = 0
-    @State private var previewChapter: Int = 0
-    /// Verse number that was tapped — the panel auto-scrolls to align it to
-    /// the top. No highlight is applied, per preference.
-    @State private var previewTargetVerse: Int = 0
-    @State private var isLoadingPreview = false
 
     var body: some View {
         VStack(spacing: 0) {
+            titleStrip
             header
             Divider()
 
@@ -67,16 +56,7 @@ struct ReadingPlanPanel: View {
             } else if planEntry == nil {
                 noEntryForToday
             } else {
-                // Plan reading (top) + preview (bottom) in a vertical split.
-                GeometryReader { geo in
-                    VStack(spacing: 0) {
-                        planReadingSection
-                            .frame(height: geo.size.height * 0.5)
-                        Divider()
-                        verseExpansionSection
-                            .frame(height: geo.size.height * 0.5)
-                    }
-                }
+                planReadingSection
             }
         }
         .background(theme.background)
@@ -84,13 +64,29 @@ struct ReadingPlanPanel: View {
         .onChange(of: selectedPlanPath) { loadTodaysPlan() }
     }
 
-    // MARK: - Header (plan picker)
+    // MARK: - Title strip
+
+    private var titleStrip: some View {
+        HStack {
+            Image(systemName: "calendar")
+                .font(.system(size: 11))
+                .foregroundStyle(filigreeAccent)
+            Text("READING PLAN")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(filigreeAccent)
+                .tracking(1.2)
+            Spacer()
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 10)
+        .padding(.bottom, 4)
+        .background(theme.background)
+    }
+
+    // MARK: - Header (plan picker + passage range label)
 
     private var header: some View {
         HStack(spacing: 10) {
-            Image(systemName: "calendar")
-                .font(.system(size: 12))
-                .foregroundStyle(filigreeAccent)
             Menu {
                 Button("None") { selectedPlanPath = "" }
                 if !availablePlans.isEmpty { Divider() }
@@ -113,6 +109,8 @@ struct ReadingPlanPanel: View {
             }
             .menuStyle(.borderlessButton)
             Spacer()
+            // Plain passage range label. Keep the text visible, but do
+            // not make it interactive.
             if let entry = planEntry {
                 Text(entry.displayText)
                     .font(.caption.weight(.semibold))
@@ -124,11 +122,10 @@ struct ReadingPlanPanel: View {
         .background(theme.background)
     }
 
-    // MARK: - Plan reading (top half)
+    // MARK: - Plan reading section
     //
-    // Renders today's passage as a scrolling list of verses. Each verse
-    // number is a tap target that loads the whole chapter into the bottom
-    // preview and scrolls to that verse.
+    // Scrollable list of verses covered by today's plan entry. Each verse
+    // number is tappable and jumps to that exact verse in the Bible tab.
 
     private var planReadingSection: some View {
         ScrollView {
@@ -150,18 +147,16 @@ struct ReadingPlanPanel: View {
 
     @ViewBuilder
     private func verseRow(_ v: MyBibleVerse) -> some View {
-        // Two elements in one line: tappable verse number (opens preview),
-        // then the verse text. Kept inline so reading flows naturally.
         HStack(alignment: .firstTextBaseline, spacing: 6) {
             Button {
-                loadPreview(bookNumber: v.book, chapter: v.chapter, verse: v.verse)
+                openVerseInBible(bookNumber: v.book, chapter: v.chapter, verse: v.verse)
             } label: {
                 Text("\(v.verse)")
                     .font(.system(size: max(10, fontSize - 4), weight: .semibold))
                     .foregroundStyle(filigreeAccent)
             }
             .buttonStyle(.plain)
-            .help("Load Romans \(v.chapter):\(v.verse) below")
+            .help("Open in Bible")
 
             Text(v.text)
                 .font(resolvedFont)
@@ -169,92 +164,6 @@ struct ReadingPlanPanel: View {
                 .lineSpacing(4)
                 .fixedSize(horizontal: false, vertical: true)
         }
-    }
-
-    // MARK: - Preview section (bottom half)
-
-    @ViewBuilder
-    private var verseExpansionSection: some View {
-        ScrollViewReader { proxy in
-            VStack(spacing: 0) {
-                expansionHeader
-                Divider()
-                if isLoadingPreview {
-                    loadingState(text: "Loading chapter…")
-                } else if previewVerses.isEmpty {
-                    VStack(spacing: 8) {
-                        Spacer()
-                        Image(systemName: "arrow.up")
-                            .font(.system(size: 18))
-                            .foregroundStyle(.quaternary)
-                        Text("Tap a verse number above to load it here.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .multilineTextAlignment(.center)
-                        Spacer()
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else {
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 10) {
-                            ForEach(previewVerses, id: \.verse) { v in
-                                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                                    Text("\(v.verse)")
-                                        .font(.system(size: max(10, fontSize - 4), weight: .semibold))
-                                        .foregroundStyle(filigreeAccent)
-                                    Text(v.text)
-                                        .font(resolvedFont)
-                                        .foregroundStyle(theme.text)
-                                        .lineSpacing(4)
-                                        .fixedSize(horizontal: false, vertical: true)
-                                }
-                                .id(v.verse)   // enables scrollTo
-                            }
-                        }
-                        .padding(.horizontal, 20).padding(.vertical, 12)
-                    }
-                    .onAppear { scrollToTarget(proxy: proxy) }
-                    .onChange(of: previewTargetVerse) { scrollToTarget(proxy: proxy) }
-                }
-            }
-        }
-        .background(theme.background)
-    }
-
-    private var expansionHeader: some View {
-        HStack(spacing: 10) {
-            if !previewVerses.isEmpty {
-                Text(previewHeaderText)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-            } else {
-                Text("Preview")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-            }
-            Spacer()
-            if !previewVerses.isEmpty {
-                Button {
-                    openInBibleTab()
-                } label: {
-                    HStack(spacing: 4) {
-                        Text("Open in Bible")
-                            .font(.caption.weight(.semibold))
-                        Image(systemName: "arrow.right.circle.fill")
-                            .font(.system(size: 12))
-                    }
-                    .foregroundStyle(filigreeAccent)
-                }
-                .buttonStyle(.plain)
-                .help("Jump to this passage in the Bible tab")
-            }
-        }
-        .padding(.horizontal, 16).padding(.vertical, 8)
-    }
-
-    private var previewHeaderText: String {
-        let bookName = myBibleBookNumbers[previewBook] ?? "\(previewBook)"
-        return "\(bookName) \(previewChapter)"
     }
 
     // MARK: - Fallback states
@@ -324,14 +233,12 @@ struct ReadingPlanPanel: View {
     }
 
     /// Expands a PlanEntry into the list of verses it covers. A plan entry
-    /// can span multiple chapters (e.g. Romans 1-3); we fetch each chapter
+    /// can span multiple chapters (e.g. Romans 1–3); we fetch each chapter
     /// and concatenate, filtering to the start/end verse range where given.
+    /// Guards against inverted or zero ranges from third-party modules.
     private func loadPlanVerses(for entry: MyBibleService.PlanEntry,
                                  from bible: MyBibleModule) async -> [MyBibleVerse] {
         let startCh = entry.startChapter
-        // Some reading plan modules store an end chapter that's lower than
-        // the start (data quirk / review-day row / malformed entry). Clamp
-        // to at least startCh so the range below never inverts.
         let rawEndCh = entry.endChapter ?? entry.startChapter
         let endCh    = max(rawEndCh, startCh)
         guard startCh > 0 else { return [] }
@@ -341,7 +248,6 @@ struct ReadingPlanPanel: View {
                                                           bookNumber: entry.bookNumber,
                                                           chapter: chapter)
             for v in chapterVerses {
-                // Trim to start/end verse when specified on the first/last chapter.
                 if chapter == startCh, let sv = entry.startVerse, v.verse < sv { continue }
                 if chapter == endCh,   let ev = entry.endVerse,   v.verse > ev { continue }
                 out.append(v)
@@ -350,41 +256,15 @@ struct ReadingPlanPanel: View {
         return out
     }
 
-    private func loadPreview(bookNumber: Int, chapter: Int, verse: Int) {
-        guard let bibleModule = myBible.selectedBible else { return }
-        isLoadingPreview   = true
-        previewBook        = bookNumber
-        previewChapter     = chapter
-        previewTargetVerse = verse
-        Task {
-            let verses = await myBible.fetchVerses(module: bibleModule,
-                                                    bookNumber: bookNumber,
-                                                    chapter: chapter)
-            await MainActor.run {
-                previewVerses    = verses
-                isLoadingPreview = false
-            }
-        }
-    }
+    // MARK: - Navigation
 
-    private func scrollToTarget(proxy: ScrollViewProxy) {
-        guard previewTargetVerse > 0 else { return }
-        // Small delay so the ForEach has rendered before we scroll.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-            withAnimation {
-                proxy.scrollTo(previewTargetVerse, anchor: .top)
-            }
-        }
-    }
-
-    private func openInBibleTab() {
-        guard !previewVerses.isEmpty else { return }
+    private func openVerseInBible(bookNumber: Int, chapter: Int, verse: Int) {
         NotificationCenter.default.post(
             name: .navigateToPassage, object: nil,
             userInfo: [
-                "bookNumber": previewBook,
-                "chapter":    previewChapter,
-                "verse":      previewTargetVerse
+                "bookNumber": bookNumber,
+                "chapter":    chapter,
+                "verse":      verse
             ]
         )
     }

@@ -38,13 +38,26 @@ struct InterlinearModule: Identifiable, Hashable {
 @MainActor
 class InterlinearService: ObservableObject {
 
+    // STARTUP DIAGNOSTIC — 2026-04-21
+    init() {
+        print("[STARTUP] InterlinearService.init()")
+    }
+
     @Published var modules:     [InterlinearModule] = []
     @Published var selectedOT:  InterlinearModule?  = nil
     @Published var selectedNT:  InterlinearModule?  = nil
     @Published var isLoaded:    Bool                = false
 
+    // 2026-04-21: concurrent-load guard. `isLoaded` only flips inside the
+    // detached Task's completion block, so without this flag every caller
+    // arriving before the first scan finishes races past the guard and
+    // kicks off its own scan. @MainActor isolation makes a plain Bool safe.
+    private var isLoading: Bool = false
+
     func loadIfNeeded() {
-        guard !isLoaded else { return }
+        guard !AppRuntimeContext.isRunningTests else { return }
+        print("[STARTUP] InterlinearService.loadIfNeeded() isLoaded=\(isLoaded) isLoading=\(isLoading)")
+        guard !isLoaded, !isLoading else { return }
         print("[InterlinearService] loadIfNeeded called")
         guard let folder = ModulesFolderBookmark.resolve() else {
             print("[InterlinearService] bookmark resolve failed, trying plain path")
@@ -53,6 +66,7 @@ class InterlinearService: ObservableObject {
                 print("[InterlinearService] no modules folder set")
                 return
             }
+            isLoading = true
             scan(in: URL(fileURLWithPath: path))
             return
         }
@@ -61,6 +75,7 @@ class InterlinearService: ObservableObject {
             print("[InterlinearService] failed to access security scope")
             return
         }
+        isLoading = true
         scan(in: folder)
         folder.stopAccessingSecurityScopedResource()
     }
@@ -97,6 +112,7 @@ class InterlinearService: ObservableObject {
                 self.selectedOT = found.first(where: { $0.isRTL })
                 self.selectedNT = found.first(where: { !$0.isRTL })
                 self.isLoaded   = true
+                self.isLoading  = false
                 print("[InterlinearService] Found \(found.count) interlinear modules")
             }
         }

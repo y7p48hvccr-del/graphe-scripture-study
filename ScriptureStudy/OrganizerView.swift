@@ -6,7 +6,6 @@ import SQLite3
 
 struct OrganizerView: View {
 
-    @EnvironmentObject var notesManager:     NotesManager
     @EnvironmentObject var myBible:          MyBibleService
     @EnvironmentObject var calendarStore:    CalendarEventStore
 
@@ -24,9 +23,6 @@ struct OrganizerView: View {
     @State private var dayDetail:       DayDetail? = nil
     @State private var isLoadingDetail: Bool = false
     @State private var completedDays:   Set<Int> = []
-    @State private var organizerSaveTimer: Timer? = nil
-    @State private var organizerNote: Note? = nil
-    @StateObject private var editorController  = NoteEditorController()
 
     // Calendar colours
     let calRed    = Color(red: 0.90, green: 0.15, blue: 0.15)
@@ -64,20 +60,6 @@ struct OrganizerView: View {
         .onAppear {
             loadCompletedDays()
             loadDayDetail(for: selectedDate)
-        }
-        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("noteCreatedFromVerse"))) { note in
-            if let noteObj = note.userInfo?["note"] as? Note {
-                organizerNote = noteObj
-            }
-        }
-        .onChange(of: notesManager.selectedNote) { _, note in
-            // When a note is newly created (selectedNote changes), update organizer editor
-            if let note = note, organizerNote == nil || note.id != organizerNote?.id {
-                // Only show notes that were created from a verse (have book reference)
-                if note.bookNumber > 0 {
-                    organizerNote = note
-                }
-            }
         }
     }
 
@@ -311,78 +293,8 @@ struct OrganizerView: View {
             }
           }
 
-          // ── Note editor below prayer list ──────────────────────
-          Divider()
-          noteEditorSection
         }
         .background(Color.clear)
-    }
-
-
-    // MARK: - Note editor (bottom of right panel)
-
-    private var noteEditorSection: some View {
-        VStack(spacing: 0) {
-            // Note title header
-            HStack {
-                Image(systemName: "note.text")
-                    .font(.system(size: 11)).foregroundStyle(calBlue)
-                Text(organizerNote?.displayTitle ?? "No note selected")
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundStyle(calBlue)
-                    .lineLimit(1)
-                Spacer()
-                if let note = organizerNote {
-                    Button {
-                        notesManager.delete(note)
-                        organizerNote = nil
-                    } label: {
-                        Image(systemName: "trash")
-                            .font(.system(size: 11))
-                            .foregroundStyle(Color.red.opacity(0.7))
-                    }
-                    .buttonStyle(.plain)
-                    .help("Permanently delete this note")
-                }
-            }
-            .padding(.horizontal, 14).padding(.vertical, 8)
-            .background(Color(red: 1.0, green: 0.98, blue: 0.92))
-
-            Divider()
-
-            // Editor
-            if let note = organizerNote {
-                NoteTextEditor(
-                    noteID:      note.id,
-                    initialText: note.content,
-                    onTextChange: { val in
-                        var u = note; u.content = val
-                        organizerSaveTimer?.invalidate()
-                        organizerSaveTimer = Timer.scheduledTimer(withTimeInterval: 0.8, repeats: false) { _ in Task { @MainActor in self.notesManager.save(u) }
-                        }
-                    },
-                    fontSize:    16,
-                    fontName:    "",
-                    controller:  editorController,
-                    isEditable:  true
-                )
-                .id(note.id)
-                .background(calBg)
-            } else {
-                VStack {
-                    Spacer()
-                    Image(systemName: "note.text")
-                        .font(.system(size: 28)).foregroundStyle(Color(white: 0.85))
-                    Text("Long-press a verse number\nto create a note here")
-                        .font(.system(size: 12))
-                        .foregroundStyle(Color(white: 0.6))
-                        .multilineTextAlignment(.center)
-                    Spacer()
-                }
-                .frame(maxWidth: .infinity)
-                .background(calBg)
-            }
-        }
     }
 
 

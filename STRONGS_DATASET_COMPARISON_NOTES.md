@@ -10,6 +10,21 @@ Compared files:
 - `/Users/richardbillings/Desktop/Codex/Strong_Dictionary.SQLite3`
 - `/Users/richardbillings/Desktop/Codex/SECE.dictionary.SQLite3`
 
+## Short Handoff
+
+- The two Strong's dictionaries are not interchangeable.
+- `SECE.dictionary.SQLite3` has much richer long-form `definition` content on average.
+- `Strong_Dictionary.SQLite3` contains extended `G0...` entries that `SECE.dictionary.SQLite3` lacks.
+- Topic drift is not limited to `G0...`; Greek coverage differs in both directions.
+- `Strong_Dictionary.SQLite3` includes many suffixed or extended Greek keys.
+- `SECE.dictionary.SQLite3` includes a contiguous block of standard Greek keys absent from `Strong_Dictionary.SQLite3`.
+- `short_definition` overlap looks broadly aligned where topics match.
+- Hebrew divergence appears minimal in this comparison.
+- Exact dictionary keys must be preserved.
+- Do not normalize away meaningful zeros or suffix-like distinctions.
+- Do not silently swap `Strong_Dictionary.SQLite3` for `SECE.dictionary.SQLite3`.
+- If `SECE` is used in future, treat it as a selectable or layered enrichment source, not an assumed replacement.
+
 ## Scope
 
 The comparison work focused on:

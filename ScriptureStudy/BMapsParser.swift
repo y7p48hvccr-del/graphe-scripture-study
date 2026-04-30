@@ -290,11 +290,11 @@ class BMapsParser {
     }
 
     private static func normalizedMapNumber(for topic: String, fallbackIndex: Int) -> String {
-        if let range = topic.range(of: #"\d+"#, options: .regularExpression) {
-            let number = String(topic[range])
-            return number.count >= 2 ? String(number.prefix(2)) : String(format: "%02d", Int(number) ?? fallbackIndex)
+        if let range = topic.range(of: #"\d+"#, options: .regularExpression),
+           let n = Int(String(topic[range])) {
+            return String(format: "%03d", n)
         }
-        return String(format: "%02d", fallbackIndex)
+        return String(format: "%03d", fallbackIndex)
     }
 
     private static func firstHeading(in html: String) -> String? {

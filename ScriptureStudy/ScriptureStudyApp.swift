@@ -14,7 +14,10 @@ struct ScriptureStudyApp: App {
     @StateObject private var bibleService  = BibleAPIService()
     @StateObject private var ollamaService = OllamaService()
     @StateObject private var myBible       = MyBibleService()
-    @StateObject private var notesManager      = NotesManager()
+    @StateObject private var notesManager      = NotesManager(
+        storageDirectoryOverride: AppRuntimeContext.isRunningTests ? AppRuntimeContext.testNotesDirectory : nil,
+        remoteSyncEnabled: !AppRuntimeContext.isRunningTests
+    )
     @StateObject private var bookmarksManager  = BookmarksManager()
     @StateObject private var favouritesStore   = FavouritesStore()
     @StateObject private var calendarStore     = CalendarEventStore()
@@ -35,30 +38,36 @@ struct ScriptureStudyApp: App {
 
     var body: some Scene {
         WindowGroup(id: "main") {
-            ZStack {
-                // 2026-04-21: ContentView lives in the tree from app launch
-                // regardless of splash state. The previous
-                // `if readyToShow { ContentView() }` pattern was losing
-                // SwiftUI view identity across body re-evaluations (each
-                // @Published change on any App-level service caused the
-                // WindowGroup body to re-evaluate, and the `if` wrapper
-                // wasn't consistently preserving ContentView's identity
-                // across those re-evals). Result was ContentView being
-                // reconstructed 7× on cold start — which spun up 7
-                // LocalBibleViews, 7 CompanionPanels, 7 WKWebViews, and
-                // 7 concurrent loadChapter() races. Keeping ContentView
-                // unconditionally in the tree with splash overlaid on
-                // top gives SwiftUI one stable identity to preserve.
-                ContentView()
-                // Launch splash — shows first, then optionally onboarding
-                if !launchDone {
-                    LaunchScreenView {
-                        withAnimation { launchDone = true }
-                        // Show onboarding after splash if needed
-                        // ContentView handles onboarding internally
+            Group {
+                if AppRuntimeContext.isRunningTests {
+                    Color.clear
+                } else {
+                    ZStack {
+                        // 2026-04-21: ContentView lives in the tree from app launch
+                        // regardless of splash state. The previous
+                        // `if readyToShow { ContentView() }` pattern was losing
+                        // SwiftUI view identity across body re-evaluations (each
+                        // @Published change on any App-level service caused the
+                        // WindowGroup body to re-evaluate, and the `if` wrapper
+                        // wasn't consistently preserving ContentView's identity
+                        // across those re-evals). Result was ContentView being
+                        // reconstructed 7× on cold start — which spun up 7
+                        // LocalBibleViews, 7 CompanionPanels, 7 WKWebViews, and
+                        // 7 concurrent loadChapter() races. Keeping ContentView
+                        // unconditionally in the tree with splash overlaid on
+                        // top gives SwiftUI one stable identity to preserve.
+                        ContentView()
+                        // Launch splash — shows first, then optionally onboarding
+                        if !launchDone {
+                            LaunchScreenView {
+                                withAnimation { launchDone = true }
+                                // Show onboarding after splash if needed
+                                // ContentView handles onboarding internally
+                            }
+                            .zIndex(99)
+                            .transition(.opacity)
+                        }
                     }
-                    .zIndex(99)
-                    .transition(.opacity)
                 }
             }
                 .environmentObject(bibleService)

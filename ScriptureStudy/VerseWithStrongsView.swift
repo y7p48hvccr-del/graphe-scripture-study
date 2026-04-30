@@ -326,11 +326,8 @@ struct VerseWithStrongsView: View {
                 icon:  "square.and.pencil",
                 enabled: true
             ) {
-                print("[NOTE DEBUG] popover Make a Note tapped — closure entered")
                 activePopover = nil
-                print("[NOTE DEBUG] popover about to call onAddNote()")
                 onAddNote()
-                print("[NOTE DEBUG] popover onAddNote() returned")
             }
 
             Divider().padding(.leading, 14)
@@ -454,7 +451,6 @@ struct VerseWithStrongsView: View {
     private func popoverButton(label: String, icon: String,
                                 enabled: Bool, action: @escaping () -> Void) -> some View {
         Button {
-            print("[NOTE DEBUG] popoverButton tapped — label=\(label) enabled=\(enabled)")
             if enabled { action() }
         } label: {
             HStack(spacing: 10) {
