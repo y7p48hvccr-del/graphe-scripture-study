@@ -23,14 +23,32 @@ struct FlowLayout: Layout {
     }
 
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        var x = bounds.minX; var y = bounds.minY; var rowHeight: CGFloat = 0
+        let isRightToLeft = subviews.layoutDirection == .rightToLeft
+        var x = isRightToLeft ? bounds.maxX : bounds.minX
+        var y = bounds.minY
+        var rowHeight: CGFloat = 0
+
         for subview in subviews {
             let size = subview.sizeThatFits(.unspecified)
-            if x + size.width > bounds.maxX, x > bounds.minX {
-                y += rowHeight + vSpacing; x = bounds.minX; rowHeight = 0
+            if isRightToLeft {
+                if x - size.width < bounds.minX, x < bounds.maxX {
+                    y += rowHeight + vSpacing
+                    x = bounds.maxX
+                    rowHeight = 0
+                }
+                x -= size.width
+                subview.place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(size))
+                x -= hSpacing
+            } else {
+                if x + size.width > bounds.maxX, x > bounds.minX {
+                    y += rowHeight + vSpacing
+                    x = bounds.minX
+                    rowHeight = 0
+                }
+                subview.place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(size))
+                x += size.width + hSpacing
             }
-            subview.place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(size))
-            x += size.width + hSpacing; rowHeight = max(rowHeight, size.height)
+            rowHeight = max(rowHeight, size.height)
         }
     }
 }
@@ -62,11 +80,13 @@ struct VerseWithStrongsView: View {
     let rawText:       String
     let strongsModule: MyBibleModule?
     let isSelected:    Bool
+    let isLockedVerse: Bool
     let hasNote:       Bool
     let isBookmarked:  Bool
     let linkedNotes:   [Note]
     let onTapVerseNum:       () -> Void   // kept for compatibility, not used directly
     let onLongPressVerseNum: () -> Void   // kept for compatibility, not used directly
+    let onToggleVerseLock:   () -> Void
     let onToggleBookmark:    () -> Void
     let onAddNote:           () -> Void
 
@@ -128,6 +148,7 @@ struct VerseWithStrongsView: View {
     @State private var strongsFlash: Bool = false
 
     var body: some View {
+        let isVerseActive = isSelected || isLockedVerse
         HStack(alignment: .top, spacing: 8) {
 
             // ── Gutter column (verse number + status icons) ──────────
@@ -149,10 +170,10 @@ struct VerseWithStrongsView: View {
                         // Right-click = context menu for quick remove.
                         ZStack {
                             BookmarkRibbon()
-                                .fill(SilkBookmarkRibbonView.silkRed)
+                                .fill(isVerseActive ? filigreeAccent : SilkBookmarkRibbonView.silkRed)
                                 .frame(width: 14, height: 20)
                             Text("\(verse.verse)")
-                                .font(.system(size: 11, weight: .bold))
+                                .font(.system(size: 11, weight: isVerseActive ? .heavy : .bold))
                                 .foregroundStyle(Color.white)
                                 .offset(y: -1)   // centre in the non-notched part
                         }
@@ -162,6 +183,9 @@ struct VerseWithStrongsView: View {
                             }
                             activePopover = .verse
                         }
+                        .onLongPressGesture {
+                            onLongPressVerseNum()
+                        }
                         .contextMenu {
                             Button(role: .destructive) {
                                 onToggleBookmark()
@@ -169,14 +193,14 @@ struct VerseWithStrongsView: View {
                                 Label("Remove Bookmark", systemImage: "bookmark.slash")
                             }
                         }
-                        .help("Tap for options · right-click to remove bookmark")
+                        .help("Tap for options · long-press to lock companion · right-click to remove bookmark")
                     } else {
                         Text("\(verse.verse)")
-                            .font(.system(size: 11, weight: .bold))
-                            .foregroundStyle(isSelected ? .white : filigreeAccent.opacity(0.7))
+                            .font(.system(size: 11, weight: isVerseActive ? .heavy : .bold))
+                            .foregroundStyle(isVerseActive ? .white : filigreeAccent.opacity(0.7))
                             .frame(minWidth: 18, alignment: .trailing)
-                            .padding(.horizontal, 3).padding(.vertical, 2)
-                            .background(isSelected ? filigreeAccent : Color.clear)
+                            .padding(.horizontal, 5).padding(.vertical, 3)
+                            .background(isVerseActive ? filigreeAccent : Color.clear)
                             .clipShape(RoundedRectangle(cornerRadius: 4))
                             .onTapGesture {
                                 commentaryAvailable = myBible.visibleModules.contains {
@@ -184,7 +208,10 @@ struct VerseWithStrongsView: View {
                                 }
                                 activePopover = .verse
                             }
-                            .help("Tap for options")
+                            .onLongPressGesture {
+                                onLongPressVerseNum()
+                            }
+                            .help("Tap for options · long-press to lock companion")
                     }
                 }
 
@@ -272,7 +299,7 @@ struct VerseWithStrongsView: View {
             // (above), alongside the bookmark icon.
         }
         .padding(.horizontal, 6).padding(.vertical, 3)
-        .background(isSelected ? filigreeAccentFill.opacity(0.20) : Color.clear)
+        .background(isVerseActive ? filigreeAccentFill.opacity(0.24) : Color.clear)
         .clipShape(RoundedRectangle(cornerRadius: 6))
         .popover(isPresented: Binding(
             get: { activePopover == .verse },
@@ -317,6 +344,17 @@ struct VerseWithStrongsView: View {
                     name: Notification.Name("switchCompanionToCommentary"),
                     object: nil
                 )
+            }
+
+            Divider().padding(.leading, 14)
+
+            popoverButton(
+                label: isLockedVerse ? "Unlock Companion Lock" : "Lock Companion Here",
+                icon: isLockedVerse ? "link.badge.minus" : "link.badge.plus",
+                enabled: true
+            ) {
+                activePopover = nil
+                onToggleVerseLock()
             }
 
             Divider().padding(.leading, 14)

@@ -8,13 +8,10 @@ struct ModuleLibraryView: View {
     var theme: AppTheme { AppTheme.find(themeID) }
 
     @EnvironmentObject var myBible: MyBibleService
-    @State private var showingESwordPicker = false
-    @State private var showingImportPicker = false
     @State private var importStatus:   String? = nil
     @State private var importIsError:  Bool    = false
     @State private var searchText:       String  = ""
     @State private var searchMode:       String  = "modules"  // "modules" or "languages"
-    @State private var moduleMetadata:   [String: String] = [:]
     @State private var selectedTab:      String  = "All"
     @State private var refreshRotation:  Double  = 0
     @AppStorage("defaultLanguage") private var selectedLanguage: String  = "all"
@@ -37,16 +34,18 @@ struct ModuleLibraryView: View {
 
     // MARK: - Computed module lists
 
-    var bibles:         [MyBibleModule] { myBible.modules.filter { $0.type == .bible } }
-    var strongsBibles:  [MyBibleModule] { myBible.modules.filter { $0.type == .bible && myBible.strongsFilePaths.contains($0.filePath) } }
-    var commentaries: [MyBibleModule] { myBible.modules.filter { $0.type == .commentary } }
-    var crossRefMods: [MyBibleModule] { myBible.modules.filter { $0.type == .crossRef || $0.type == .crossRefNative } }
-    var devotionals:  [MyBibleModule] { myBible.modules.filter { $0.type == .devotional } }
-    var dictMods:     [MyBibleModule] { myBible.modules.filter { $0.type == .dictionary } }
-    var encyclopediaMods: [MyBibleModule] { myBible.modules.filter { $0.type == .encyclopedia } }
-    var strongsMods:  [MyBibleModule] { myBible.modules.filter { $0.type == .strongs } }
-    var readingPlans: [MyBibleModule] { myBible.modules.filter { $0.type == .readingPlan } }
-    var others:       [MyBibleModule] { myBible.modules.filter { $0.type == .unknown || $0.type == .subheadings || $0.type == .wordIndex } }
+    var allBibleModules: [MyBibleModule] { myBible.availableVisibleModules(ofTypes: [.bible]) }
+    var bibles:         [MyBibleModule] { allBibleModules.filter { !myBible.isInterlinearModule($0) && myBible.supportsCapability("passageLookup", for: $0) } }
+    var interlinearMods: [MyBibleModule] { allBibleModules.filter { myBible.isInterlinearModule($0) } }
+    var strongsBibles:  [MyBibleModule] { bibles.filter { myBible.hasStrongsCapability($0) } }
+    var commentaries: [MyBibleModule] { myBible.availableVisibleModules(ofTypes: [.commentary], requiring: "commentaryLookup") }
+    var crossRefMods: [MyBibleModule] { myBible.availableVisibleModules(ofTypes: [.crossRef, .crossRefNative], requiring: "crossReferenceLookup") }
+    var devotionals:  [MyBibleModule] { myBible.availableVisibleModules(ofTypes: [.devotional], requiring: "devotionalLookup") }
+    var dictMods:     [MyBibleModule] { myBible.availableVisibleModules(ofTypes: [.dictionary], requiring: "articleLookup") }
+    var encyclopediaMods: [MyBibleModule] { myBible.availableVisibleModules(ofTypes: [.encyclopedia], requiring: "articleLookup") }
+    var strongsMods:  [MyBibleModule] { myBible.availableVisibleModules(ofTypes: [.strongs], requiring: "articleLookup") }
+    var readingPlans: [MyBibleModule] { myBible.availableVisibleModules(ofTypes: [.readingPlan], requiring: "readingPlanLookup") }
+    var others:       [MyBibleModule] { myBible.visibleModules.filter { !myBible.isRuntimeReady($0) || $0.type == .unknown || $0.type == .subheadings || $0.type == .wordIndex } }
     var favourites:   [MyBibleModule] { myBible.modules.filter { !myBible.hiddenModules.contains($0.filePath) } }
 
     // Common abbreviation expansions for search
@@ -73,14 +72,22 @@ struct ModuleLibraryView: View {
         // Region filter
         let regionFiltered: [MyBibleModule]
         if let region = LanguageInfo.regionMap.first(where: { $0.name == selectedRegion }) {
-            regionFiltered = modules.filter { region.codes.contains($0.language.lowercased()) }
+            regionFiltered = modules.filter { module in
+                if region.codes.contains(module.language.lowercased()) {
+                    return true
+                }
+                // Interlinear modules can be useful under the currently selected
+                // language even when their base module language is Hebrew/Greek.
+                return myBible.isInterlinearModule(module) &&
+                    myBible.moduleMatchesLanguageFilter(module, languageCode: selectedLanguage)
+            }
         } else {
             regionFiltered = modules
         }
         // Language filter
         let langFiltered = selectedLanguage == "all"
             ? regionFiltered
-            : regionFiltered.filter { $0.language.lowercased() == selectedLanguage }
+            : regionFiltered.filter { myBible.moduleMatchesLanguageFilter($0, languageCode: selectedLanguage) }
         // Search filter — only applies in modules mode
         guard searchMode == "modules" else { return langFiltered }
         let q = searchText.trimmingCharacters(in: .whitespaces).lowercased()
@@ -90,7 +97,7 @@ struct ModuleLibraryView: View {
         return langFiltered.filter { m in
             let name = m.name.lowercased()
             let lang = m.language.lowercased()
-            let meta = (moduleMetadata[m.filePath] ?? "").lowercased()
+            let meta = (myBible.metadataBlob(for: m) ?? "").lowercased()
             return terms.contains { t in
                 name.contains(t) || lang.contains(t) || meta.contains(t)
             }
@@ -176,6 +183,10 @@ struct ModuleLibraryView: View {
                         .font(.largeTitle).foregroundStyle(.quaternary)
                     Text("No MyBible modules found in that folder.")
                         .foregroundStyle(.secondary)
+                    if !myBible.moduleDiagnostics.isEmpty {
+                        diagnosticsSummaryCard
+                            .padding(.horizontal, 24)
+                    }
                     Button("Choose Different Folder") { pickFolder() }
                         .foregroundStyle(Color.primary)
                         .padding(.horizontal, 12).padding(.vertical, 6)
@@ -199,14 +210,14 @@ struct ModuleLibraryView: View {
                 }
             }
             ToolbarItem {
-                Button { showingImportPicker = true } label: {
+                Button { pickModuleFiles() } label: {
                     Label("Import Files", systemImage: "plus.circle")
                 }
                 .help("Copy .graphe or .sqlite3 module files into your modules folder")
                 .disabled(myBible.modulesFolder.isEmpty)
             }
             ToolbarItem {
-                Button { showingESwordPicker = true } label: {
+                Button { pickConvertibleModule() } label: {
                     Label("Import e-Sword", systemImage: "square.and.arrow.down")
                 }
                 .help("Import e-Sword/MySword module")
@@ -253,32 +264,6 @@ struct ModuleLibraryView: View {
             }
         }
         .animation(.easeInOut, value: importStatus)
-        .fileImporter(
-            isPresented: $showingESwordPicker,
-            allowedContentTypes: [.item],
-            allowsMultipleSelection: false
-        ) { result in
-            switch result {
-            case .success(let urls):
-                guard let url = urls.first else { return }
-                importESword(url: url)
-            case .failure(let error):
-                importStatus  = "Failed to open file: \(error.localizedDescription)"
-                importIsError = true
-            }
-        }
-        .fileImporter(
-            isPresented: $showingImportPicker,
-            allowedContentTypes: [.item],
-            allowsMultipleSelection: true
-        ) { result in
-            switch result {
-            case .success(let urls): importModuleFiles(urls)
-            case .failure(let error):
-                importStatus  = "Failed: \(error.localizedDescription)"
-                importIsError = true
-            }
-        }
     }
 
     // MARK: - Empty state
@@ -312,6 +297,7 @@ struct ModuleLibraryView: View {
         var tabs = [ModuleTab(id: "All", label: "All")]
         let pairs: [(String, [MyBibleModule])] = [
             ("Bibles",           bibles),
+            ("Interlinear",      interlinearMods),
             ("Strongs",          strongsBibles),
             ("Commentaries",     commentaries),
             ("Cross-References", crossRefMods),
@@ -332,6 +318,7 @@ struct ModuleLibraryView: View {
     private func modulesForTab() -> [MyBibleModule] {
         switch selectedTab {
         case "Bibles":           return filtered(bibles)
+        case "Interlinear":      return filtered(interlinearMods)
         case "Strongs":          return filtered(strongsBibles)
         case "Commentaries":     return filtered(commentaries)
         case "Cross-References": return filtered(crossRefMods)
@@ -359,11 +346,9 @@ struct ModuleLibraryView: View {
                 .frame(minWidth: 200, maxWidth: 320)
         }
         .onAppear {
-            moduleMetadata = myBible.metadataBlobs
             // Sync language selection from persisted filter
             selectedLanguage = myBible.selectedLanguageFilter
         }
-        .onChange(of: myBible.metadataBlobs) { _, newBlobs in moduleMetadata = newBlobs }
     }
 
     // MARK: - Side panel
@@ -560,6 +545,14 @@ struct ModuleLibraryView: View {
                                 Button("Change") { pickFolder() }.controlSize(.small)
                             }
                         } header: { Text("Modules Folder") }
+
+                        if !myBible.moduleDiagnostics.isEmpty {
+                            Section {
+                                ForEach(Array(myBible.moduleDiagnostics.enumerated()), id: \.element.filePath) { _, diagnostic in
+                                    diagnosticRow(for: diagnostic)
+                                }
+                            } header: { Text("Scan Diagnostics") }
+                        }
                     }
                 }
             }
@@ -687,6 +680,71 @@ struct ModuleLibraryView: View {
         }
     }
 
+    private var diagnosticsSummaryCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+                Text("Scan Diagnostics")
+                    .font(.system(size: 13, weight: .semibold))
+            }
+            Text("The folder contains module files, but they could not be cataloged yet.")
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(Array(myBible.moduleDiagnostics.prefix(3).enumerated()), id: \.element.filePath) { _, diagnostic in
+                    diagnosticRow(for: diagnostic)
+                }
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: 560, alignment: .leading)
+        .background(Color.orange.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(Color.orange.opacity(0.18), lineWidth: 1)
+        )
+    }
+
+    @ViewBuilder
+    private func diagnosticRow(for diagnostic: ModuleCatalogDiagnostic) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Image(systemName: diagnostic.validation.state == .rejected ? "xmark.octagon.fill" : "exclamationmark.triangle.fill")
+                    .foregroundStyle(diagnostic.validation.state == .rejected ? .red : .orange)
+                Text(URL(fileURLWithPath: diagnostic.filePath).lastPathComponent)
+                    .font(.system(size: 12, weight: .semibold))
+                    .lineLimit(1)
+                Spacer()
+                Text(diagnostic.validation.state.rawValue)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
+            Text(diagnostic.reason)
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+            if let profile = diagnostic.validation.matchedProfileName {
+                Text("Profile: \(profile)")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+            }
+            if !diagnostic.tableNames.isEmpty {
+                Text("Tables: \(diagnostic.tableNames.joined(separator: ", "))")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(2)
+            }
+            if !diagnostic.attemptedMetadataReaders.isEmpty {
+                Text("Readers: \(diagnostic.attemptedMetadataReaders.joined(separator: ", "))")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(2)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
     // MARK: - Metadata search loader
 
 
@@ -694,7 +752,7 @@ struct ModuleLibraryView: View {
 
     private func importESword(url: URL) {
         let ext = url.pathExtension.lowercased()
-        let supported = ["bblx","cmtx","dctx","lexdbtx","topx","resx","devotx","mybible"]
+        let supported = ["bbl","bblx","cmtx","dctx","lexdbtx","topx","resx","devotx","mybible"]
         guard supported.contains(ext) else {
             importStatus  = "Unsupported: .\(ext)"
             importIsError = true
@@ -703,34 +761,31 @@ struct ModuleLibraryView: View {
         importStatus  = "Converting \(url.lastPathComponent)…"
         importIsError = false
         #if os(macOS)
-        let folder  = myBible.modulesFolder
-        let srcPath = url.path
-        DispatchQueue.global(qos: .userInitiated).async {
-            let script = Bundle.main.path(forResource: "esword_converter", ofType: "py") ?? ""
-            let task   = Process()
-            task.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
-            task.arguments     = [script, srcPath, folder]
-            let pipe = Pipe()
-            task.standardOutput = pipe
-            task.standardError  = pipe
+        guard ext == "bbl" else {
+            importStatus = "In-app conversion currently supports .bbl only. Use the desktop converter for .\(ext)."
+            importIsError = true
+            return
+        }
+
+        Task.detached(priority: .userInitiated) {
+            guard let modulesFolderURL = ModulesFolderBookmark.resolve() else {
+                await MainActor.run {
+                    importStatus = "Modules folder is no longer accessible. Please re-select it."
+                    importIsError = true
+                }
+                return
+            }
+
             do {
-                try task.run(); task.waitUntilExit()
-                let output = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-                let ok     = task.terminationStatus == 0
-                DispatchQueue.main.async {
-                    if ok {
-                        importStatus  = "\(url.lastPathComponent) imported"
-                        importIsError = false
-                        Task { await myBible.scanModules() }
-                    } else {
-                        let last = output.components(separatedBy: "\n").filter { !$0.isEmpty }.last ?? "Unknown error"
-                        importStatus  = "Import failed: \(last)"
-                        importIsError = true
-                    }
+                let installedURL = try BBLImportService.importBible(from: url, into: modulesFolderURL)
+                await MainActor.run {
+                    importStatus = "\(installedURL.lastPathComponent) installed"
+                    importIsError = false
+                    Task { await myBible.scanModules() }
                 }
             } catch {
-                DispatchQueue.main.async {
-                    importStatus  = "Could not run converter: \(error.localizedDescription)"
+                await MainActor.run {
+                    importStatus = "Import failed: \(error.localizedDescription)"
                     importIsError = true
                 }
             }
@@ -741,48 +796,72 @@ struct ModuleLibraryView: View {
     // MARK: - Folder picker
 
     private func importModuleFiles(_ urls: [URL]) {
-        guard let destFolder = ModulesFolderBookmark.resolve() else {
-            importStatus  = "Modules folder is no longer accessible. Please re-select it."
-            importIsError = true
-            return
-        }
-        guard destFolder.startAccessingSecurityScopedResource() else {
-            importStatus  = "Could not access modules folder. Please re-select it."
-            importIsError = true
-            return
-        }
-        defer { destFolder.stopAccessingSecurityScopedResource() }
+        importStatus = "Importing files…"
+        importIsError = false
 
-        var copied = 0
-        var skipped = 0
-        for url in urls {
-            guard url.startAccessingSecurityScopedResource() else { continue }
-            defer { url.stopAccessingSecurityScopedResource() }
-            let ext = url.pathExtension.lowercased()
-            guard ext == "graphe" || ext == "sqlite3" || ext == "sqlite" || ext == "db" else {
-                skipped += 1
-                continue
-            }
-            let dest = destFolder.appendingPathComponent(url.lastPathComponent)
-            do {
-                if FileManager.default.fileExists(atPath: dest.path) {
-                    try FileManager.default.removeItem(at: dest)
+        Task.detached(priority: .userInitiated) {
+            guard let destFolder = ModulesFolderBookmark.resolve() else {
+                await MainActor.run {
+                    importStatus = "Modules folder is no longer accessible. Please re-select it."
+                    importIsError = true
                 }
-                try FileManager.default.copyItem(at: url, to: dest)
-                copied += 1
-            } catch {
-                importStatus  = "Error copying \(url.lastPathComponent): \(error.localizedDescription)"
-                importIsError = true
                 return
             }
-        }
-        if copied > 0 {
-            importStatus  = "\(copied) module\(copied == 1 ? "" : "s") imported"
-            importIsError = false
-            Task { await myBible.scanModules() }
-        } else {
-            importStatus  = skipped > 0 ? "No .graphe or .sqlite3 files selected" : "Nothing imported"
-            importIsError = true
+            guard destFolder.startAccessingSecurityScopedResource() else {
+                await MainActor.run {
+                    importStatus = "Could not access modules folder. Please re-select it."
+                    importIsError = true
+                }
+                return
+            }
+            defer { destFolder.stopAccessingSecurityScopedResource() }
+
+            var copied = 0
+            var skipped = 0
+            for url in urls {
+                guard url.startAccessingSecurityScopedResource() else { continue }
+                defer { url.stopAccessingSecurityScopedResource() }
+                let ext = url.pathExtension.lowercased()
+                guard ext == "graphe" || ext == "sqlite3" || ext == "sqlite" || ext == "db" else {
+                    skipped += 1
+                    continue
+                }
+                let dest = destFolder.appendingPathComponent(url.lastPathComponent)
+                do {
+                    if FileManager.default.fileExists(atPath: dest.path) {
+                        try FileManager.default.removeItem(at: dest)
+                    }
+                    try FileManager.default.copyItem(at: url, to: dest)
+                    copied += 1
+                } catch {
+                    await MainActor.run {
+                        importStatus = "Error copying \(url.lastPathComponent): \(error.localizedDescription)"
+                        importIsError = true
+                    }
+                    return
+                }
+            }
+
+            let copiedCount = copied
+            let skippedCount = skipped
+            let statusMessage: String
+            let isError: Bool
+            if copiedCount > 0 {
+                statusMessage = "\(copiedCount) module\(copiedCount == 1 ? "" : "s") imported"
+                isError = false
+            } else {
+                statusMessage = skippedCount > 0 ? "No .graphe or .sqlite3 files selected" : "Nothing imported"
+                isError = true
+            }
+
+            await MainActor.run {
+                importStatus = statusMessage
+                importIsError = isError
+                if copiedCount > 0 {
+                    importIsError = false
+                    Task { await myBible.scanModules() }
+                }
+            }
         }
     }
 
@@ -810,6 +889,32 @@ struct ModuleLibraryView: View {
             defer { url.stopAccessingSecurityScopedResource() }
             ModulesFolderBookmark.save(url)
             myBible.modulesFolder = url.path   // sentinel so empty-state check works
+        }
+        #endif
+    }
+
+    private func pickModuleFiles() {
+        #if os(macOS)
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = true
+        panel.prompt = "Import Files"
+        if panel.runModal() == .OK {
+            importModuleFiles(panel.urls)
+        }
+        #endif
+    }
+
+    private func pickConvertibleModule() {
+        #if os(macOS)
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Convert and Install"
+        if panel.runModal() == .OK, let url = panel.url {
+            importESword(url: url)
         }
         #endif
     }

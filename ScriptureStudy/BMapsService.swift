@@ -229,10 +229,9 @@ class BMapsService: ObservableObject {
     }
 
     private func hasCompatibleAtlasSchema(at url: URL) -> Bool {
-        var db: OpaquePointer?
-        guard sqlite3_open_v2(url.path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else { return false }
-        defer { sqlite3_close(db) }
-        return AtlasSchema.dictionarySource(in: db) != nil
+        GrapheRuntimeStorage.withOpenDatabase(at: url.path) { db in
+            AtlasSchema.dictionarySource(in: db) != nil
+        } ?? false
     }
 }
 
@@ -264,127 +263,95 @@ extension BMapsService {
     }
 
     private nonisolated static func buildHTML(dbPath: String, mapID: String) -> String? {
-        var db: OpaquePointer?
-        guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else { return nil }
-        defer { sqlite3_close(db) }
-
-        // Detect whether this is an encrypted .graphe file
-        let isGraphe = dbPath.hasSuffix(".graphe")
-
-        // Load CSS from info table
-        var css = ""
-        if AtlasSchema.infoTableExists(in: db),
-           let stmt = prepare(db, "SELECT value FROM info WHERE name='html_style'") {
-            if sqlite3_step(stmt) == SQLITE_ROW {
-                let raw: String?
-                if isGraphe {
-                    let ptr = sqlite3_column_blob(stmt, 0)?.assumingMemoryBound(to: UInt8.self)
-                    let len = sqlite3_column_bytes(stmt, 0)
-                    let decrypted = grapheDecrypt(ptr, len, filePath: dbPath)
-                    raw = (decrypted?.isEmpty == false) ? decrypted : sqlite3_column_text(stmt, 0).map { String(cString: $0) }
-                } else {
-                    raw = sqlite3_column_text(stmt, 0).map { String(cString: $0) }
+        GrapheRuntimeStorage.withOpenDatabase(at: dbPath) { db in
+            // Load CSS from info table
+            var css = ""
+            if AtlasSchema.infoTableExists(in: db),
+               let stmt = prepare(db, "SELECT value FROM info WHERE name='html_style'") {
+                if sqlite3_step(stmt) == SQLITE_ROW {
+                    let raw = GrapheRuntimeStorage.columnString(stmt, 0, path: dbPath)
+                    css = (raw ?? "").replacingOccurrences(of: "%COLOR_TEXT%", with: "#333333")
                 }
-                css = (raw ?? "").replacingOccurrences(of: "%COLOR_TEXT%", with: "#333333")
+                sqlite3_finalize(stmt)
             }
-            sqlite3_finalize(stmt)
-        }
 
-        // Load map article HTML
-        var articleHTML = ""
-        guard let dictionarySource = AtlasSchema.dictionarySource(in: db) else { return nil }
-        let articleSQL = """
-        SELECT \(AtlasSchema.quotedIdentifier(dictionarySource.definitionColumn))
-        FROM \(AtlasSchema.quotedIdentifier(dictionarySource.table))
-        WHERE \(AtlasSchema.quotedIdentifier(dictionarySource.topicColumn))=?
-        """
-        if let stmt = prepare(db, articleSQL) {
-            sqlite3_bind_text(stmt, 1, mapID, -1, SQLITE_TRANSIENT)
-            if sqlite3_step(stmt) == SQLITE_ROW {
-                if isGraphe {
-                    let ptr = sqlite3_column_blob(stmt, 0)?.assumingMemoryBound(to: UInt8.self)
-                    let len = sqlite3_column_bytes(stmt, 0)
-                    articleHTML = grapheDecrypt(ptr, len, filePath: dbPath) ?? ""
-                } else if let ptr = sqlite3_column_text(stmt, 0) {
-                    articleHTML = String(cString: ptr)
-                }
-            }
-            sqlite3_finalize(stmt)
-        }
-        guard !articleHTML.isEmpty else { return nil }
-
-        // Load all content_fragments for substitution
-        var fragments: [String: String] = [:]
-        if let fragmentsSource = AtlasSchema.fragmentsSource(in: db) {
-            let fragmentsSQL = """
-            SELECT \(AtlasSchema.quotedIdentifier(fragmentsSource.idColumn)),
-                   \(AtlasSchema.quotedIdentifier(fragmentsSource.fragmentColumn))
-            FROM \(AtlasSchema.quotedIdentifier(fragmentsSource.table))
+            // Load map article HTML
+            var articleHTML = ""
+            guard let dictionarySource = AtlasSchema.dictionarySource(in: db) else { return nil }
+            let articleSQL = """
+            SELECT \(AtlasSchema.quotedIdentifier(dictionarySource.definitionColumn))
+            FROM \(AtlasSchema.quotedIdentifier(dictionarySource.table))
+            WHERE \(AtlasSchema.quotedIdentifier(dictionarySource.topicColumn))=?
             """
-            if let stmt = prepare(db, fragmentsSQL) {
-            while sqlite3_step(stmt) == SQLITE_ROW {
-                guard let idPtr = sqlite3_column_text(stmt, 0) else { continue }
-                let key = String(cString: idPtr)
-                var fragStr = ""
-                if isGraphe {
-                    let ptr = sqlite3_column_blob(stmt, 1)?.assumingMemoryBound(to: UInt8.self)
-                    let len = sqlite3_column_bytes(stmt, 1)
-                    // Try decryption first; some columns in .graphe may be plain text
-                    if let decrypted = grapheDecrypt(ptr, len, filePath: dbPath), !decrypted.isEmpty {
-                        fragStr = decrypted
-                    } else if let textPtr = sqlite3_column_text(stmt, 1) {
-                        fragStr = String(cString: textPtr)
-                    }
-                } else if let fragPtr = sqlite3_column_text(stmt, 1) {
-                    fragStr = String(cString: fragPtr)
+            if let stmt = prepare(db, articleSQL) {
+                sqlite3_bind_text(stmt, 1, mapID, -1, SQLITE_TRANSIENT)
+                if sqlite3_step(stmt) == SQLITE_ROW {
+                    articleHTML = GrapheRuntimeStorage.columnString(stmt, 0, path: dbPath) ?? ""
                 }
-                // Fix any missing base64 padding so browsers can decode the image
-                fragments[key] = BMapsService.fixBase64Padding(in: fragStr)
+                sqlite3_finalize(stmt)
             }
-            sqlite3_finalize(stmt)
+            guard !articleHTML.isEmpty else { return nil }
+
+            // Load all content_fragments for substitution
+            var fragments: [String: String] = [:]
+            if let fragmentsSource = AtlasSchema.fragmentsSource(in: db) {
+                let fragmentsSQL = """
+                SELECT \(AtlasSchema.quotedIdentifier(fragmentsSource.idColumn)),
+                       \(AtlasSchema.quotedIdentifier(fragmentsSource.fragmentColumn))
+                FROM \(AtlasSchema.quotedIdentifier(fragmentsSource.table))
+                """
+                if let stmt = prepare(db, fragmentsSQL) {
+                    while sqlite3_step(stmt) == SQLITE_ROW {
+                        guard let idPtr = sqlite3_column_text(stmt, 0) else { continue }
+                        let key = String(cString: idPtr)
+                        let fragStr = GrapheRuntimeStorage.columnString(stmt, 1, path: dbPath) ?? ""
+                        fragments[key] = BMapsService.fixBase64Padding(in: fragStr)
+                    }
+                    sqlite3_finalize(stmt)
+                }
             }
-        }
 
-        // Substitute <!-- INCLUDE(key) --> placeholders
-        let body = substituteIncludes(in: articleHTML, fragments: fragments)
+            // Substitute <!-- INCLUDE(key) --> placeholders
+            let body = substituteIncludes(in: articleHTML, fragments: fragments)
 
-        return """
-        <!DOCTYPE html>
-        <html>
-        <head>
-        <meta charset="utf-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=3.0">
-        <style>
-        body { margin: 0; padding: 8px; font-family: -apple-system, sans-serif; font-size: 14px; }
-        \(css)
-        a[href^="S:"], a[href^="B:"] { color: #6b8cba; }
+            return """
+            <!DOCTYPE html>
+            <html>
+            <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=3.0">
+            <style>
+            body { margin: 0; padding: 8px; font-family: -apple-system, sans-serif; font-size: 14px; }
+            \(css)
+            a[href^="S:"], a[href^="B:"] { color: #6b8cba; }
 
-        /* Make map markers readable over any map background */
-        .marker {
-            position: absolute;
-            background: rgba(255, 255, 255, 0.88);
-            border: 1px solid rgba(0, 0, 0, 0.25);
-            border-radius: 3px;
-            padding: 1px 5px;
-            font-size: 10px;
-            font-weight: 600;
-            color: #1a1a2e;
-            white-space: nowrap;
-            box-shadow: 0 1px 4px rgba(0,0,0,0.25);
-            text-shadow: none;
-            line-height: 1.4;
-            pointer-events: none;
-        }
+            /* Make map markers readable over any map background */
+            .marker {
+                position: absolute;
+                background: rgba(255, 255, 255, 0.88);
+                border: 1px solid rgba(0, 0, 0, 0.25);
+                border-radius: 3px;
+                padding: 1px 5px;
+                font-size: 10px;
+                font-weight: 600;
+                color: #1a1a2e;
+                white-space: nowrap;
+                box-shadow: 0 1px 4px rgba(0,0,0,0.25);
+                text-shadow: none;
+                line-height: 1.4;
+                pointer-events: none;
+            }
 
-        /* Ensure map container and image allow full-width display */
-        .map-container { width: 100%; overflow: visible; }
-        .map-container img { width: 100%; height: auto; display: block; }
-        figure.map { width: 100%; margin: 0; padding: 0; overflow: visible; }
-        </style>
-        </head>
-        <body>\(body)</body>
-        </html>
-        """
+            /* Ensure map container and image allow full-width display */
+            .map-container { width: 100%; overflow: visible; }
+            .map-container img { width: 100%; height: auto; display: block; }
+            figure.map { width: 100%; margin: 0; padding: 0; overflow: visible; }
+            </style>
+            </head>
+            <body>\(body)</body>
+            </html>
+            """
+        } ?? nil
     }
 
     private nonisolated static func prepare(_ db: OpaquePointer?, _ sql: String) -> OpaquePointer? {

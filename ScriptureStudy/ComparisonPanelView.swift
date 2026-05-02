@@ -35,6 +35,10 @@ struct ComparisonPanelView: View {
         }
     }
 
+    private var availableVerseNumbers: Set<Int> {
+        Set(verses.map(\.verse))
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             // Header bar
@@ -125,15 +129,13 @@ struct ComparisonPanelView: View {
                     }
                     .background(Color.white)
                     .onChange(of: syncedVerse) { _, v in
-                        if v > 0 {
-                            withAnimation { proxy.scrollTo(v, anchor: .center) }
-                        }
+                        guard v > 0, availableVerseNumbers.contains(v) else { return }
+                        proxy.scrollTo(v, anchor: .top)
                     }
-                    .onChange(of: verses) {
-                        if syncedVerse > 0 {
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                                withAnimation { proxy.scrollTo(syncedVerse, anchor: .center) }
-                            }
+                    .onChange(of: verses.count) { _, _ in
+                        guard syncedVerse > 0, availableVerseNumbers.contains(syncedVerse) else { return }
+                        DispatchQueue.main.async {
+                            proxy.scrollTo(syncedVerse, anchor: .top)
                         }
                     }
                 }

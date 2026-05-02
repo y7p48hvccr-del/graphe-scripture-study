@@ -20,7 +20,7 @@ struct CommentaryView: View {
     @State private var isNavigating        = false
     @State private var showSyncedBadge     = false
 
-    var commentaries: [MyBibleModule] { myBible.visibleModules.filter { $0.type == .commentary } }
+    var commentaries: [MyBibleModule] { myBible.availableVisibleModules(ofTypes: [.commentary], requiring: "commentaryLookup") }
 
     var body: some View {
         Group {
@@ -159,7 +159,7 @@ struct CommentaryView: View {
             handleNavigation(note)
         }
         // Sync with Bible tab when passage changes
-        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("biblePassageChanged"))) { note in
+        .onReceive(NotificationCenter.default.publisher(for: .biblePassageChanged)) { note in
             guard let bookNum = note.userInfo?["bookNumber"] as? Int,
                   let chapter = note.userInfo?["chapter"]    as? Int,
                   !isNavigating else { return }

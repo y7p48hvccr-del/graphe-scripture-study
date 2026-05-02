@@ -31,8 +31,24 @@ struct InterlinearView: View {
 
     private var isOT: Bool { bookNumber < 470 }
 
+    private var languageFilteredModules: [InterlinearModule] {
+        let scriptMatched = interlinearSvc.modules.filter { $0.isRTL == isOT }
+        let filter = myBible.selectedLanguageFilter.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !filter.isEmpty, filter != "all" else { return scriptMatched }
+        let languageMatched = scriptMatched.filter { $0.supportsLanguage(filter) }
+        return languageMatched.isEmpty ? scriptMatched : languageMatched
+    }
+
     private var activeModule: InterlinearModule? {
-        isOT ? interlinearSvc.selectedOT : interlinearSvc.selectedNT
+        let selected = isOT ? interlinearSvc.selectedOT : interlinearSvc.selectedNT
+        if let selected, languageFilteredModules.contains(selected) {
+            return selected
+        }
+        return languageFilteredModules.first
+    }
+
+    private var availableVerseNumbers: Set<Int> {
+        Set(verses.map(\.verse))
     }
 
     var body: some View {
@@ -89,6 +105,10 @@ struct InterlinearView: View {
         .onChange(of: chapter)     { selectedStrongs = ""; loadVerses() }
         .onChange(of: interlinearSvc.selectedOT) { loadVerses() }
         .onChange(of: interlinearSvc.selectedNT) { loadVerses() }
+        .onChange(of: myBible.selectedLanguageFilter) {
+            selectedStrongs = ""
+            loadVerses()
+        }
     }
 
     // MARK: - Module bar
@@ -104,18 +124,18 @@ struct InterlinearView: View {
             Spacer()
 
             // Module picker
-            let candidates = interlinearSvc.modules.filter { $0.isRTL == isOT }
+            let candidates = languageFilteredModules
             if candidates.count > 1 {
                 Menu {
                     ForEach(candidates) { mod in
-                        Button(mod.name) {
+                        Button(moduleMenuLabel(for: mod)) {
                             if isOT { interlinearSvc.selectedOT = mod }
                             else    { interlinearSvc.selectedNT = mod }
                         }
                     }
                 } label: {
                     HStack(spacing: 4) {
-                        Text(activeModule?.name.components(separatedBy: "(").first?.trimmingCharacters(in: .whitespaces) ?? "None")
+                        Text(activeModule.map(moduleButtonLabel(for:)) ?? "None")
                             .font(.caption).foregroundStyle(theme.text).lineLimit(1)
                         Image(systemName: "chevron.up.chevron.down")
                             .font(.system(size: 8)).foregroundStyle(accent)
@@ -125,12 +145,23 @@ struct InterlinearView: View {
                 }
                 .menuStyle(.borderlessButton)
             } else if let mod = activeModule {
-                Text(mod.name.components(separatedBy: "(").first?.trimmingCharacters(in: .whitespaces) ?? mod.name)
+                Text(moduleButtonLabel(for: mod))
                     .font(.caption).foregroundStyle(.secondary).lineLimit(1)
             }
         }
         .padding(.horizontal, 12).padding(.vertical, 7)
         .background(theme.background)
+    }
+
+    private func moduleButtonLabel(for module: InterlinearModule) -> String {
+        let title = module.name.components(separatedBy: "(").first?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolvedTitle = (title?.isEmpty == false ? title! : module.name)
+        let linked = module.hyperlinkLanguages.isEmpty ? module.language.uppercased() : module.hyperlinkLanguages
+        return "\(resolvedTitle) [\(linked)]"
+    }
+
+    private func moduleMenuLabel(for module: InterlinearModule) -> String {
+        "\(moduleButtonLabel(for: module)) • \(module.fileStem)"
     }
 
     // MARK: - Chapter view
@@ -142,45 +173,83 @@ struct InterlinearView: View {
                     ForEach(verses) { interlinearVerse in
                         let isSynced = syncedVerse > 0 && interlinearVerse.verse == syncedVerse
                         VStack(alignment: .leading, spacing: 8) {
-                            // Verse number
-                            Text("\(interlinearVerse.verse)")
-                                .font(.system(size: 10, weight: .bold))
-                                .foregroundStyle(.white)
-                                .padding(.horizontal, 7).padding(.vertical, 2)
-                                .background(isSynced ? filigreeAccentFill : filigreeAccentFill.opacity(0.5),
-                                            in: Capsule())
-
-                            // Token flow
-                            FlowLayout(hSpacing: 6, vSpacing: 8) {
-                                ForEach(interlinearVerse.tokens) { token in
-                                    InterlinearWordCell(
-                                        token:      token,
-                                        isOT:       isOT,
-                                        isSelected: token.strongsNum == selectedStrongs,
-                                        accent:     accent,
-                                        theme:      theme
-                                    )
-                                    .onTapGesture { tapped(token) }
+                            if isOT {
+                                HStack {
+                                    Spacer(minLength: 0)
+                                    verseBadge(for: interlinearVerse.verse, isSynced: isSynced)
                                 }
+
+                                RTLFlowLayout(hSpacing: 6, vSpacing: 8) {
+                                    ForEach(interlinearVerse.tokens) { token in
+                                        tokenCell(for: token)
+                                    }
+                                }
+                                .frame(maxWidth: .infinity, alignment: .trailing)
+                            } else {
+                                verseBadge(for: interlinearVerse.verse, isSynced: isSynced)
+
+                                FlowLayout(hSpacing: 6, vSpacing: 8) {
+                                    ForEach(interlinearVerse.tokens) { token in
+                                        tokenCell(for: token)
+                                    }
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
                             }
                         }
                         .padding(.horizontal, 12).padding(.vertical, 10)
-                        .background(isSynced ? accent.opacity(0.06) : Color.clear)
+                        .background(isSynced ? accent.opacity(0.12) : Color.clear)
+                        .overlay {
+                            if isSynced {
+                                RoundedRectangle(cornerRadius: 8)
+                                    .stroke(accent.opacity(0.30), lineWidth: 1)
+                            }
+                        }
                         .id(interlinearVerse.verse)
 
-                        Divider().padding(.leading, 12)
+                        Divider().padding(isOT ? .trailing : .leading, 12)
                     }
 
                     Spacer().frame(height: 20)
                 }
             }
             .onChange(of: syncedVerse) { _, v in
-                if v > 0 { withAnimation { proxy.scrollTo(v, anchor: .center) } }
+                if v > 0, availableVerseNumbers.contains(v) {
+                    DispatchQueue.main.async {
+                        proxy.scrollTo(v, anchor: .top)
+                    }
+                }
             }
         }
     }
 
     // MARK: - Actions
+
+    private func verseBadge(for verse: Int, isSynced: Bool) -> some View {
+        Text("\(verse)")
+            .font(.system(size: isSynced ? 11 : 10, weight: isSynced ? .heavy : .bold))
+            .foregroundStyle(.white)
+            .padding(.horizontal, isSynced ? 9 : 7).padding(.vertical, isSynced ? 3 : 2)
+            .background(isSynced ? filigreeAccentFill : filigreeAccentFill.opacity(0.5), in: Capsule())
+            .overlay {
+                if isSynced {
+                    Capsule()
+                        .stroke(accent.opacity(0.35), lineWidth: 1)
+                }
+            }
+    }
+
+    @ViewBuilder
+    private func tokenCell(for token: InterlinearToken) -> some View {
+        let isSelected = token.strongsNum == selectedStrongs
+        InterlinearWordCell(
+            token: token,
+            isOT: isOT,
+            isSelected: isSelected,
+            accent: accent,
+            theme: theme
+        )
+        .onTapGesture { tapped(token) }
+    }
 
     private func tapped(_ token: InterlinearToken) {
         guard !token.strongsNum.isEmpty else { return }
@@ -230,6 +299,51 @@ struct InterlinearView: View {
             Spacer()
         }
         .frame(maxWidth: .infinity).background(theme.background)
+    }
+}
+
+private struct RTLFlowLayout: Layout {
+    var hSpacing: CGFloat = 6
+    var vSpacing: CGFloat = 8
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let maxWidth = proposal.width ?? 0
+        var height: CGFloat = 0
+        var rowWidth: CGFloat = 0
+        var rowHeight: CGFloat = 0
+
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if rowWidth + size.width > maxWidth, rowWidth > 0 {
+                height += rowHeight + vSpacing
+                rowWidth = 0
+                rowHeight = 0
+            }
+            rowWidth += size.width + hSpacing
+            rowHeight = max(rowHeight, size.height)
+        }
+
+        return CGSize(width: maxWidth, height: height + rowHeight)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var x = bounds.maxX
+        var y = bounds.minY
+        var rowHeight: CGFloat = 0
+
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if x - size.width < bounds.minX, x < bounds.maxX {
+                y += rowHeight + vSpacing
+                x = bounds.maxX
+                rowHeight = 0
+            }
+
+            x -= size.width
+            subview.place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(size))
+            x -= hSpacing
+            rowHeight = max(rowHeight, size.height)
+        }
     }
 }
 

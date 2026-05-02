@@ -39,8 +39,11 @@ struct LocalBibleView: View {
     @State private var toastVisible:      Bool    = false
     @State private var toastIsProgress:   Bool    = false
     @State private var toastTimer:        Timer?
-    @State private var scrollOffset:      CGFloat       = 0
+    @State private var scrollOffset:      CGFloat        = 0
     @State private var verseFrames:       [Int: CGFloat] = [:]
+    @State private var scrollSyncedVerse: Int            = 0
+    @State private var lastBroadcastVerse: Int?          = nil
+    @State private var lockedVerse:       Int            = 0
 
     // MARK: - Navigation history (session only)
     @State private var historyStack: [(book: Int, chapter: Int, verse: Int)] = []
@@ -187,6 +190,24 @@ struct LocalBibleView: View {
                 await loadChapter()
                 if targetVerse > 0 {
                     selectedVerse = targetVerse
+                    lockedVerse = targetVerse
+                    let userInfo: [String: Any] = [
+                        "bookNumber": selectedBookNumber,
+                        "chapter": selectedChapter,
+                        "verse": targetVerse
+                    ]
+                    NotificationCenter.default.post(
+                        name: Notification.Name("verseSelected"),
+                        object: nil,
+                        userInfo: userInfo
+                    )
+                    NotificationCenter.default.post(
+                        name: Notification.Name("verseLockChanged"),
+                        object: nil,
+                        userInfo: userInfo
+                    )
+                } else {
+                    lockedVerse = 0
                 }
                 isNavigatingToPassage = false
             }
@@ -286,10 +307,9 @@ struct LocalBibleView: View {
 
             // Bible picker — custom fixed-width button with popover list
             BiblePickerButton(
-                modules: myBible.visibleModules.filter {
-                    $0.type == .bible &&
+                modules: myBible.availableVisibleModules(ofTypes: [.bible], requiring: "passageLookup").filter {
                     (myBible.selectedLanguageFilter == "all" || myBible.selectedLanguageFilter.isEmpty || $0.language.lowercased() == myBible.selectedLanguageFilter) &&
-                    (!strongsOnly || myBible.strongsFilePaths.contains($0.filePath))
+                    (!strongsOnly || myBible.hasStrongsCapability($0))
                 },
                 selected: Binding(
                     get: { myBible.selectedBible },
@@ -330,7 +350,7 @@ struct LocalBibleView: View {
             .menuStyle(.borderlessButton)
             .fixedSize()
             .onChange(of: selectedBookNumber) { guard !isNavigatingToPassage else { return }
-                selectedChapter = 1; updateChapterCount(); selectedVerse = 0
+                selectedChapter = 1; updateChapterCount(); selectedVerse = 0; lockedVerse = 0
                 Task { await loadChapter() }
             }
 
@@ -349,6 +369,7 @@ struct LocalBibleView: View {
             .fixedSize()
             .onChange(of: selectedChapter) { guard !isNavigatingToPassage else { return }
                 selectedVerse = 0
+                lockedVerse = 0
                 Task { await loadChapter() }
             }
 
@@ -452,13 +473,13 @@ struct LocalBibleView: View {
 
     private var statusBar: some View {
         Group {
-            if selectedVerse > 0 {
+            if selectedVerse > 0 || lockedVerse > 0 {
                 HStack {
-                    Text("Verse \(selectedVerse) selected")
+                    Text(lockedVerse > 0 ? "Companion locked to verse \(lockedVerse)" : "Verse \(selectedVerse) selected")
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                     Spacer()
-                    Text("tap again to deselect  ·  long-press to add note")
+                    Text(lockedVerse > 0 ? "use the verse popover to unlock" : "tap again to deselect  ·  use the popover to add a note")
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                 }
@@ -494,6 +515,7 @@ struct LocalBibleView: View {
                         let _ = annotatedVerses // observe changes
                         let _ = bookmarkedVerseNumbers  // observe changes
                         let isSelected  = selectedVerse == verse.verse
+                        let isLockedVerse = lockedVerse == verse.verse
                         let hasNote     = annotatedVerses.contains(verse.verse)
                         let isVerseBookmarked = bookmarkedVerseNumbers.contains(verse.verse)
                         let linkedNotes = linkedNotesMap[verse.verse] ?? []
@@ -503,6 +525,7 @@ struct LocalBibleView: View {
                                 rawText:       myBible.rawVerseTexts[verse.verse] ?? verse.text,
                                 strongsModule: myBible.selectedStrongs,
                                 isSelected:    isSelected,
+                                isLockedVerse: isLockedVerse,
                                 hasNote:       hasNote,
                                 isBookmarked:  isVerseBookmarked,
                                 linkedNotes:   linkedNotes,
@@ -518,7 +541,28 @@ struct LocalBibleView: View {
                                     )
                                 },
                                 onLongPressVerseNum: {
-                                    createNoteForVerse(verse.verse)
+                                    lockedVerse = (lockedVerse == verse.verse) ? 0 : verse.verse
+                                    NotificationCenter.default.post(
+                                        name: Notification.Name("verseLockChanged"),
+                                        object: nil,
+                                        userInfo: [
+                                            "bookNumber": selectedBookNumber,
+                                            "chapter": selectedChapter,
+                                            "verse": lockedVerse
+                                        ]
+                                    )
+                                },
+                                onToggleVerseLock: {
+                                    lockedVerse = (lockedVerse == verse.verse) ? 0 : verse.verse
+                                    NotificationCenter.default.post(
+                                        name: Notification.Name("verseLockChanged"),
+                                        object: nil,
+                                        userInfo: [
+                                            "bookNumber": selectedBookNumber,
+                                            "chapter": selectedChapter,
+                                            "verse": lockedVerse
+                                        ]
+                                    )
                                 },
                                 onToggleBookmark: {
                                     bookmarksManager.toggle(
@@ -595,7 +639,7 @@ struct LocalBibleView: View {
                         ComparisonPanelView(
                             bookNumber:  selectedBookNumber,
                             chapter:     selectedChapter,
-                            syncedVerse: selectedVerse,
+                            syncedVerse: lockedVerse > 0 ? lockedVerse : (scrollSyncedVerse > 0 ? scrollSyncedVerse : selectedVerse),
                             onClose: { withAnimation(.easeInOut(duration: 0.25)) { showComparison = false } }
                         )
                         .frame(height: geo.size.height * 0.50)
@@ -698,6 +742,9 @@ struct LocalBibleView: View {
             scrollOffset: scrollOffset,
             verseFrames:  verseFrames
         ) else { return }
+        guard lastBroadcastVerse != topVerse else { return }
+        lastBroadcastVerse = topVerse
+        scrollSyncedVerse = topVerse
         // Keep current history entry in sync with scroll position
         if historyStack.indices.contains(historyIndex) {
             historyStack[historyIndex].verse = topVerse
@@ -796,6 +843,8 @@ struct LocalBibleView: View {
     private func loadChapter() async {
         guard let bible = myBible.selectedBible else { return }
         verseFrames = [:]   // reset on new chapter
+        scrollSyncedVerse = 0
+        lastBroadcastVerse = nil
         await myBible.loadChapter(module: bible, bookNumber: selectedBookNumber, chapter: selectedChapter)
 
         // Record in navigation history

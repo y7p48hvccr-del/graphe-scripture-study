@@ -39,7 +39,7 @@ struct ReadingPlanPanel: View {
 
     // MARK: - Loaded state
 
-    @State private var planEntry:    MyBibleService.PlanEntry? = nil
+    @State private var planEntry:    PlanEntry? = nil
     @State private var planVerses:   [MyBibleVerse] = []
     @State private var isLoadingPlan = false
 
@@ -236,7 +236,7 @@ struct ReadingPlanPanel: View {
     /// can span multiple chapters (e.g. Romans 1–3); we fetch each chapter
     /// and concatenate, filtering to the start/end verse range where given.
     /// Guards against inverted or zero ranges from third-party modules.
-    private func loadPlanVerses(for entry: MyBibleService.PlanEntry,
+    private func loadPlanVerses(for entry: PlanEntry,
                                  from bible: MyBibleModule) async -> [MyBibleVerse] {
         let startCh = entry.startChapter
         let rawEndCh = entry.endChapter ?? entry.startChapter

@@ -22,7 +22,7 @@ struct DictionaryView: View {
     @State private var lastChangeCount: Int = 0
     #endif
 
-    var dictionaries: [MyBibleModule] { myBible.modules.filter { $0.type == .dictionary } }
+    var dictionaries: [MyBibleModule] { myBible.availableVisibleModules(ofTypes: [.dictionary], requiring: "articleLookup") }
 
     var body: some View {
         #if os(macOS)
@@ -372,4 +372,3 @@ private enum DictionaryArticleRenderer {
             .replacingOccurrences(of: "\"", with: "&quot;")
     }
 }
-

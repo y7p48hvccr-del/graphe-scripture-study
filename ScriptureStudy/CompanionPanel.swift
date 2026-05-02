@@ -114,6 +114,7 @@ struct CompanionPanel: View {
     @State private var isLoading         = false
     @State private var syncedVerse:       Int               = 0
     @State private var syncScrollVerse:    Int               = 0
+    @State private var lockedVerse:        Int               = 0
 
     // Strong's
     @State private var verseNoteIDs:      [UUID]            = []
@@ -149,9 +150,9 @@ struct CompanionPanel: View {
     @State private var pendingNoteDelete:     Note?         = nil
     /// Empty Trash confirmation dialog state.
     @State private var showEmptyTrashConfirm: Bool          = false
-    @State private var crossRefGroups:    [MyBibleService.CrossRefGroup] = []
+    @State private var crossRefGroups:    [CrossRefGroup] = []
     @State private var crossRefIsLoading: Bool              = false
-    @State private var crossRefTarget:    MyBibleService.CrossRefEntry? = nil
+    @State private var crossRefTarget:    CrossRefEntry? = nil
     @State private var xrefBook:          Int?              = nil  // override for cross-ref navigation
     @State private var xrefChapter:       Int?              = nil
     @State private var xrefVerse:         Int               = 0    // verse to highlight in cross-ref passage
@@ -184,6 +185,7 @@ struct CompanionPanel: View {
 
     var bibleModules:      [MyBibleModule] { myBible.visibleModules.filter { $0.type == .bible } }
     var commentaryModules: [MyBibleModule] { myBible.visibleModules.filter { $0.type == .commentary && (myBible.selectedLanguageFilter.isEmpty || $0.language.lowercased() == myBible.selectedLanguageFilter) } }
+    private var interlinearSyncedVerse: Int { lockedVerse > 0 ? lockedVerse : (syncScrollVerse > 0 ? syncScrollVerse : syncedVerse) }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -201,8 +203,8 @@ struct CompanionPanel: View {
             pbCount = NSPasteboard.general.changeCount
             #endif
         }
-        .onChange(of: bookNumber) { syncedVerse = 0; syncScrollVerse = 0; verseNoteIDs = []; crossRefGroups = []; xrefBook = nil; xrefChapter = nil; xrefVerse = 0; load() }
-        .onChange(of: chapter)    { syncedVerse = 0; syncScrollVerse = 0; verseNoteIDs = []; crossRefGroups = []; xrefBook = nil; xrefChapter = nil; xrefVerse = 0; load() }
+        .onChange(of: bookNumber) { syncedVerse = 0; syncScrollVerse = 0; lockedVerse = 0; verseNoteIDs = []; crossRefGroups = []; xrefBook = nil; xrefChapter = nil; xrefVerse = 0; load() }
+        .onChange(of: chapter)    { syncedVerse = 0; syncScrollVerse = 0; lockedVerse = 0; verseNoteIDs = []; crossRefGroups = []; xrefBook = nil; xrefChapter = nil; xrefVerse = 0; load() }
         .onChange(of: myBible.selectedDictionary) { _, _ in
                 guard !dictWord.isEmpty else { return }
             dictDefinition = nil
@@ -317,8 +319,8 @@ struct CompanionPanel: View {
             loadStrongs(number: num, isOldTestament: isOT, pushHistory: false, clearForwardHistory: true)
         }
         .onReceive(NotificationCenter.default.publisher(for: Notification.Name("verseScrolledIntoView"))) { note in
-            // Don't sync scroll if comparison is showing a cross-ref passage
-            guard mode == .commentary, xrefBook == nil,
+            // Don't sync scroll if commentary is showing a cross-ref passage.
+            guard (mode == .commentary || mode == .interlinear), xrefBook == nil,
                   let bn = note.userInfo?["bookNumber"] as? Int,
                   let ch = note.userInfo?["chapter"]    as? Int,
                   let vs = note.userInfo?["verse"]      as? Int,
@@ -353,6 +355,15 @@ struct CompanionPanel: View {
                     crossRefIsLoading = false
                 }
             }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("verseLockChanged"))) { note in
+            guard let bn = note.userInfo?["bookNumber"] as? Int,
+                  let ch = note.userInfo?["chapter"] as? Int,
+                  let vs = note.userInfo?["verse"] as? Int,
+                  bn == bookNumber, ch == chapter else { return }
+            lockedVerse = vs
+            xrefBook = nil; xrefChapter = nil; xrefVerse = 0; crossRefTarget = nil
+            syncedVerse = vs
         }
     }
 
@@ -575,7 +586,7 @@ struct CompanionPanel: View {
         }
     }
 
-    private func navigateToCrossRef(_ ref: MyBibleService.CrossRefEntry) {
+    private func navigateToCrossRef(_ ref: CrossRefEntry) {
         if companionModule == nil {
             companionModule = myBible.visibleModules.first(where: { $0.type == .bible })
         }
@@ -1569,7 +1580,7 @@ struct CompanionPanel: View {
         case .commentary:  textContentView
         case .strongs:     dictionariesView
         case .encyclopedia: encyclopediaView
-        case .interlinear: InterlinearView(bookNumber: bookNumber, chapter: chapter, syncedVerse: syncedVerse)
+        case .interlinear: InterlinearView(bookNumber: bookNumber, chapter: chapter, syncedVerse: interlinearSyncedVerse)
                                .environmentObject(myBible)
         case .notes:       verseNotesView
         case .timeline:    TimelineView(bookNumber: bookNumber, bookName: bookName)

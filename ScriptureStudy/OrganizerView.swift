@@ -444,7 +444,7 @@ struct OrganizerView: View {
         .menuStyle(.borderlessButton)
     }
 
-    private func navigateToPlan(_ plan: MyBibleService.PlanEntry) {
+    private func navigateToPlan(_ plan: PlanEntry) {
         NotificationCenter.default.post(
             name: .navigateToPassage, object: nil,
             userInfo: ["bookNumber": plan.bookNumber, "chapter": plan.startChapter])
@@ -491,7 +491,7 @@ struct OrganizerView: View {
             }
 
             // Load reading plan entry
-            let planEntry: MyBibleService.PlanEntry? = await loadPlanEntry(day: dayNum)
+            let planEntry: PlanEntry? = await loadPlanEntry(day: dayNum)
 
             await MainActor.run {
                 dayDetail = DayDetail(
@@ -506,7 +506,7 @@ struct OrganizerView: View {
 
     /// Delegates to the shared MyBibleService implementation so both the
     /// Organiser and the Devotional page read from the same plan source.
-    private func loadPlanEntry(day: Int) async -> MyBibleService.PlanEntry? {
+    private func loadPlanEntry(day: Int) async -> PlanEntry? {
         guard let module = planModule else { return nil }
         return await myBible.loadPlanEntry(day: day, from: module)
     }
@@ -765,7 +765,7 @@ struct FacePlaceholderIcon: View {
 struct DayDetail {
     let date:            Date
     let devotionalTitle: String?
-    let planEntry:       MyBibleService.PlanEntry?
+    let planEntry:       PlanEntry?
 }
 
 struct PrayerItem: Identifiable, Codable {

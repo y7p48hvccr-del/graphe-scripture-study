@@ -153,115 +153,93 @@ private let bmapsBookNumberMap: [Int: String] = [
 class BMapsParser {
 
     static func parse(dbPath: String) -> (maps: [BibleMap], places: [BiblePlaceEntry]) {
-        var db: OpaquePointer?
-        guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
-            print("[BMapsParser] Failed to open DB at \(dbPath)")
-            return ([], [])
-        }
-        defer { sqlite3_close(db) }
-
-        var imageNames: Set<String> = []
-        let fragmentsSource = AtlasSchema.fragmentsSource(in: db)
-        if let fragmentsSource {
-            let imgSQL = """
-            SELECT \(AtlasSchema.quotedIdentifier(fragmentsSource.idColumn))
-            FROM \(AtlasSchema.quotedIdentifier(fragmentsSource.table))
-            """
-            var imgStmt: OpaquePointer?
-            if sqlite3_prepare_v2(db, imgSQL, -1, &imgStmt, nil) == SQLITE_OK {
-                while sqlite3_step(imgStmt) == SQLITE_ROW {
-                    if let cStr = sqlite3_column_text(imgStmt, 0) {
-                        imageNames.insert(String(cString: cStr))
+        GrapheRuntimeStorage.withOpenDatabase(at: dbPath) { db in
+            var imageNames: Set<String> = []
+            let fragmentsSource = AtlasSchema.fragmentsSource(in: db)
+            if let fragmentsSource {
+                let imgSQL = """
+                SELECT \(AtlasSchema.quotedIdentifier(fragmentsSource.idColumn))
+                FROM \(AtlasSchema.quotedIdentifier(fragmentsSource.table))
+                """
+                var imgStmt: OpaquePointer?
+                if sqlite3_prepare_v2(db, imgSQL, -1, &imgStmt, nil) == SQLITE_OK {
+                    while sqlite3_step(imgStmt) == SQLITE_ROW {
+                        if let cStr = sqlite3_column_text(imgStmt, 0) {
+                            imageNames.insert(String(cString: cStr))
+                        }
                     }
                 }
+                sqlite3_finalize(imgStmt)
             }
-            sqlite3_finalize(imgStmt)
-        }
 
-        let isGraphe = dbPath.hasSuffix(".graphe")
-        guard let dictionarySource = AtlasSchema.dictionarySource(in: db) else {
-            print("[BMapsParser] Could not find a compatible atlas dictionary table in \(dbPath)")
+            guard let dictionarySource = AtlasSchema.dictionarySource(in: db) else {
+                print("[BMapsParser] Could not find a compatible atlas dictionary table in \(dbPath)")
+                return ([], [])
+            }
+
+            var maps: [BibleMap] = []
+            var places: [BiblePlaceEntry] = []
+            var mapTitleLookup: [String: String] = [:]
+
+            let dictSQL = """
+            SELECT \(AtlasSchema.quotedIdentifier(dictionarySource.topicColumn)),
+                   \(AtlasSchema.quotedIdentifier(dictionarySource.definitionColumn))
+            FROM \(AtlasSchema.quotedIdentifier(dictionarySource.table))
+            ORDER BY \(AtlasSchema.quotedIdentifier(dictionarySource.topicColumn))
+            """
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, dictSQL, -1, &stmt, nil) == SQLITE_OK else {
+                return ([], [])
+            }
+
+            var rawEntries: [(topic: String, definition: String)] = []
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                guard let topicC = sqlite3_column_text(stmt, 0) else { continue }
+                let topic = String(cString: topicC)
+                guard let definition = GrapheRuntimeStorage.columnString(stmt, 1, path: dbPath),
+                      !definition.isEmpty else { continue }
+                rawEntries.append((topic, definition))
+            }
+            sqlite3_finalize(stmt)
+
+            for entry in rawEntries where looksLikeMapEntry(topic: entry.topic, definition: entry.definition) {
+                let title = entry.topic
+                    .replacingOccurrences(of: #"^#\d+\.\s*"#, with: "", options: .regularExpression)
+                mapTitleLookup[entry.topic] = title
+            }
+
+            var syntheticIndex = 1
+            for entry in rawEntries
+            where looksLikeMapEntry(topic: entry.topic, definition: entry.definition) && !entry.topic.contains("Index") {
+                let mapID = entry.topic
+                let title = normalizedMapTitle(for: mapID, fallbackHTML: entry.definition)
+                let number = normalizedMapNumber(for: mapID, fallbackIndex: syntheticIndex)
+                syntheticIndex += 1
+                let imageName = firstInclude(in: entry.definition)
+                let mapPlaces = parseMapPlaces(from: entry.definition)
+
+                maps.append(BibleMap(
+                    id: mapID,
+                    number: number,
+                    title: title,
+                    imageName: imageName,
+                    places: mapPlaces
+                ))
+            }
+            maps.sort { $0.number < $1.number }
+
+            for entry in rawEntries where !entry.topic.hasPrefix("#") {
+                let refs = parsePlaceMapRefs(from: entry.definition, titleLookup: mapTitleLookup)
+                if !refs.isEmpty {
+                    places.append(BiblePlaceEntry(id: entry.topic, name: entry.topic, mapRefs: refs))
+                }
+            }
+
+            return (maps, places)
+        } ?? {
+            print("[BMapsParser] Failed to open DB at \(dbPath)")
             return ([], [])
-        }
-
-        var maps: [BibleMap] = []
-        var places: [BiblePlaceEntry] = []
-        var mapTitleLookup: [String: String] = [:]  // id -> title
-
-        let dictSQL = """
-        SELECT \(AtlasSchema.quotedIdentifier(dictionarySource.topicColumn)),
-               \(AtlasSchema.quotedIdentifier(dictionarySource.definitionColumn))
-        FROM \(AtlasSchema.quotedIdentifier(dictionarySource.table))
-        ORDER BY \(AtlasSchema.quotedIdentifier(dictionarySource.topicColumn))
-        """
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, dictSQL, -1, &stmt, nil) == SQLITE_OK else {
-            return ([], [])
-        }
-
-        var rawEntries: [(topic: String, definition: String)] = []
-        while sqlite3_step(stmt) == SQLITE_ROW {
-            guard let topicC = sqlite3_column_text(stmt, 0) else { continue }
-            let topic = String(cString: topicC)
-
-            // For .graphe modules the definition column is AES-256-CBC encrypted;
-            // read it as a blob and decrypt — same path as MyBibleService.col().
-            let definition: String
-            if isGraphe {
-                let ptr = sqlite3_column_blob(stmt, 1)?.assumingMemoryBound(to: UInt8.self)
-                let len = sqlite3_column_bytes(stmt, 1)
-                guard let decrypted = grapheDecrypt(ptr, len, filePath: dbPath) else { continue }
-                definition = decrypted
-            } else {
-                guard let defC = sqlite3_column_text(stmt, 1) else { continue }
-                definition = String(cString: defC)
-            }
-
-            rawEntries.append((topic, definition))
-        }
-        sqlite3_finalize(stmt)
-
-        // First pass: build map title lookup
-        for entry in rawEntries where looksLikeMapEntry(topic: entry.topic, definition: entry.definition) {
-            let title = entry.topic
-                .replacingOccurrences(of: #"^#\d+\.\s*"#, with: "", options: .regularExpression)
-            mapTitleLookup[entry.topic] = title
-        }
-
-        // Second pass: parse map articles
-        var syntheticIndex = 1
-        for entry in rawEntries
-        where looksLikeMapEntry(topic: entry.topic, definition: entry.definition) && !entry.topic.contains("Index") {
-            let mapID = entry.topic
-            let title = normalizedMapTitle(for: mapID, fallbackHTML: entry.definition)
-            let number = normalizedMapNumber(for: mapID, fallbackIndex: syntheticIndex)
-            syntheticIndex += 1
-
-            // Extract first image referenced via <!-- INCLUDE(filename) -->
-            let imageName = firstInclude(in: entry.definition)
-
-            // Parse named places from <li> segments
-            let mapPlaces = parseMapPlaces(from: entry.definition)
-
-            maps.append(BibleMap(
-                id: mapID,
-                number: number,
-                title: title,
-                imageName: imageName,
-                places: mapPlaces
-            ))
-        }
-        maps.sort { $0.number < $1.number }
-
-        // Third pass: parse place entries
-        for entry in rawEntries where !entry.topic.hasPrefix("#") {
-            let refs = parsePlaceMapRefs(from: entry.definition, titleLookup: mapTitleLookup)
-            if !refs.isEmpty {
-                places.append(BiblePlaceEntry(id: entry.topic, name: entry.topic, mapRefs: refs))
-            }
-        }
-
-        return (maps, places)
+        }()
     }
 
     // MARK: - Private helpers

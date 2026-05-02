@@ -15,7 +15,7 @@ struct DevotionalView: View {
     var filigreeAccent:     Color    { resolvedFiligreeAccent(colorIndex: filigreeColor, themeID: themeID) }
     var filigreeAccentFill: Color    { resolvedFiligreeAccentFill(colorIndex: filigreeColor, themeID: themeID) }
 
-    @State private var entry:        MyBibleService.DevotionalEntry? = nil
+    @State private var entry:        DevotionalEntry? = nil
     @State private var isLoading:    Bool = true
     @State private var currentDay:   Int  = 1
     @State private var totalDays:    Int  = 365
@@ -208,7 +208,7 @@ struct DevotionalView: View {
 // MARK: - Content renderer
 
 struct DevotionalContentView: View {
-    let entry:          MyBibleService.DevotionalEntry
+    let entry:          DevotionalEntry
     let theme:          AppTheme
     let filigreeAccent: Color
     let fontSize:       Double

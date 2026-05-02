@@ -29,8 +29,25 @@ struct InterlinearModule: Identifiable, Hashable {
     let id:          String   // file path
     let name:        String
     let filePath:    String
+    let language:    String
+    let hyperlinkLanguages: String
     let isRTL:       Bool     // true for Hebrew
     let strongsPrefix: String // "G" or "H"
+
+    var fileStem: String {
+        URL(fileURLWithPath: filePath).deletingPathExtension().lastPathComponent
+    }
+
+    func supportsLanguage(_ code: String) -> Bool {
+        let normalized = code.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !normalized.isEmpty, normalized != "all" else { return true }
+        if language == normalized { return true }
+        let parts = hyperlinkLanguages
+            .lowercased()
+            .split(separator: "/")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+        return parts.contains(normalized)
+    }
 }
 
 // MARK: - Service
@@ -119,81 +136,72 @@ class InterlinearService: ObservableObject {
     }
 
     private nonisolated static func inspectModule(at path: String) -> InterlinearModule? {
-        var db: OpaquePointer?
-        guard sqlite3_open_v2(path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else { return nil }
-        defer { sqlite3_close(db) }
-
-        // Must have verses table
-        var hasVerses = false
-        if let stmt = prepare(db, "SELECT name FROM sqlite_master WHERE type='table' AND name='verses'") {
-            hasVerses = sqlite3_step(stmt) == SQLITE_ROW
-            sqlite3_finalize(stmt)
-        }
-        guard hasVerses else { return nil }
-
-        // Read info
-        var info: [String: String] = [:]
-        if let stmt = prepare(db, "SELECT name, value FROM info") {
-            while sqlite3_step(stmt) == SQLITE_ROW {
-                let k = sqlite3_column_text(stmt, 0).map { String(cString: $0) } ?? ""
-                let v = sqlite3_column_text(stmt, 1).map { String(cString: $0) } ?? ""
-                info[k] = v
+        GrapheRuntimeStorage.withOpenDatabase(at: path) { db in
+            // Must have verses table
+            var hasVerses = false
+            if let stmt = prepare(db, "SELECT name FROM sqlite_master WHERE type='table' AND name='verses'") {
+                hasVerses = sqlite3_step(stmt) == SQLITE_ROW
+                sqlite3_finalize(stmt)
             }
-            sqlite3_finalize(stmt)
-        }
+            guard hasVerses else { return nil }
 
-        // Must have strong_numbers=true AND hyperlink_languages (multi-language = interlinear)
-        guard info["strong_numbers"] == "true",
-              let hyperlink = info["hyperlink_languages"],
-              hyperlink.contains("/") else { return nil }
+            // Read info
+            var info: [String: String] = [:]
+            if let stmt = prepare(db, "SELECT name, value FROM info") {
+                while sqlite3_step(stmt) == SQLITE_ROW {
+                    let k = GrapheRuntimeStorage.columnString(stmt, 0, path: path) ?? ""
+                    let v = GrapheRuntimeStorage.columnString(stmt, 1, path: path) ?? ""
+                    info[k] = v
+                }
+                sqlite3_finalize(stmt)
+            }
 
-        // Must NOT be a lexicon (is_strong = true means it's a dictionary not a Bible)
-        if info["is_strong"] == "true" { return nil }
+            // Must have strong_numbers=true AND hyperlink_languages (multi-language = interlinear)
+            guard info["strong_numbers"] == "true",
+                  let hyperlink = info["hyperlink_languages"],
+                  hyperlink.contains("/") else { return nil }
 
-        let isRTL    = info["right_to_left"] == "true"
-        let prefix   = isRTL ? "H" : "G"
-        let name     = info["description"] ?? URL(fileURLWithPath: path).lastPathComponent
+            // Must NOT be a lexicon (is_strong = true means it's a dictionary not a Bible)
+            if info["is_strong"] == "true" { return nil }
 
-        return InterlinearModule(
-            id:            path,
-            name:          name,
-            filePath:      path,
-            isRTL:         isRTL,
-            strongsPrefix: prefix
-        )
+            let isRTL = info["right_to_left"] == "true"
+            let prefix = isRTL ? "H" : "G"
+            let name = info["description"] ?? URL(fileURLWithPath: path).lastPathComponent
+            let language = info["language"]?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? "en"
+            let hyperlinkLanguages = info["hyperlink_languages"]?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+
+            return InterlinearModule(
+                id: path,
+                name: name,
+                filePath: path,
+                language: language,
+                hyperlinkLanguages: hyperlinkLanguages,
+                isRTL: isRTL,
+                strongsPrefix: prefix
+            )
+        } ?? nil
     }
 
     // MARK: - Verse reading
 
     private nonisolated static func readVerses(dbPath: String, book: Int, chapter: Int,
                                     isRTL: Bool, prefix: String) -> [InterlinearVerse] {
-        var db: OpaquePointer?
-        guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else { return [] }
-        defer { sqlite3_close(db) }
+        GrapheRuntimeStorage.withOpenDatabase(at: dbPath) { db in
+            guard let stmt = prepare(db, "SELECT verse, text FROM verses WHERE book_number=? AND chapter=? ORDER BY verse") else { return [] }
+            sqlite3_bind_int(stmt, 1, Int32(book))
+            sqlite3_bind_int(stmt, 2, Int32(chapter))
+            defer { sqlite3_finalize(stmt) }
 
-        guard let stmt = prepare(db, "SELECT verse, text FROM verses WHERE book_number=? AND chapter=? ORDER BY verse") else { return [] }
-        sqlite3_bind_int(stmt, 1, Int32(book))
-        sqlite3_bind_int(stmt, 2, Int32(chapter))
-        defer { sqlite3_finalize(stmt) }
-
-        var result: [InterlinearVerse] = []
-        let isGraphe = dbPath.hasSuffix(".graphe")
-        while sqlite3_step(stmt) == SQLITE_ROW {
-            let verseNum = Int(sqlite3_column_int(stmt, 0))
-            let text: String
-            if isGraphe,
-               let ptr = sqlite3_column_blob(stmt, 1) {
-                let len = sqlite3_column_bytes(stmt, 1)
-                text = grapheDecrypt(ptr.assumingMemoryBound(to: UInt8.self), len, filePath: dbPath)
-                    ?? sqlite3_column_text(stmt, 1).map { String(cString: $0) }
-                    ?? ""
-            } else {
-                text = sqlite3_column_text(stmt, 1).map { String(cString: $0) } ?? ""
+            var result: [InterlinearVerse] = []
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                let verseNum = Int(sqlite3_column_int(stmt, 0))
+                let text = GrapheRuntimeStorage.columnString(stmt, 1, path: dbPath) ?? ""
+                let tokens = isRTL ? parseOT(text, prefix: prefix) : parseNT(text, prefix: prefix)
+                result.append(InterlinearVerse(verse: verseNum, tokens: tokens))
             }
-            let tokens = isRTL ? parseOT(text, prefix: prefix) : parseNT(text, prefix: prefix)
-            result.append(InterlinearVerse(verse: verseNum, tokens: tokens))
-        }
-        return result
+            return result
+        } ?? []
     }
 
     // MARK: - Unified interlinear parser

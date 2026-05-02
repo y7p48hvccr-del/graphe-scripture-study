@@ -61,7 +61,7 @@ struct TimelineView: View {
     @State private var noteText:     String             = ""
 
     private var bookCode: String {
-        MyBibleService.bookNumberToOsisCode(bookNumber)
+        ScriptureBookCatalog.osisCode(for: bookNumber)
     }
 
     private var filteredEvents: [TimelineEvent] {

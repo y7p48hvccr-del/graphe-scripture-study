@@ -6,6 +6,8 @@ struct SearchResult: Identifiable {
     let reference: String
     let snippet:   String
     let moduleName: String    // which Bible/commentary it came from
+    let score: Int
+    let route: SearchRoute?
     let bookNumber: Int
     let chapter:   Int
     let verse:     Int
@@ -32,6 +34,137 @@ struct SearchResult: Identifiable {
     enum ReferenceKind {
         case dictionary
         case encyclopedia
+    }
+
+    enum SearchRoute {
+        case passage(PassageNavigationRequest)
+        case commentary(bookNumber: Int, chapter: Int, moduleName: String)
+        case reference(modulePath: String, lookupQuery: String, kind: ReferenceKind)
+        case note(UUID)
+    }
+}
+
+extension SearchResult {
+    static func bible(
+        reference: String,
+        snippet: String,
+        moduleName: String,
+        bookNumber: Int,
+        chapter: Int,
+        verse: Int,
+        modulePath: String,
+        score: Int
+    ) -> SearchResult {
+        let route = SearchRoute.passage(
+            PassageNavigationRequest(
+                bookNumber: bookNumber,
+                chapter: chapter,
+                verse: verse,
+                moduleName: moduleName
+            )
+        )
+        return SearchResult(
+            type: .bible,
+            reference: reference,
+            snippet: snippet,
+            moduleName: moduleName,
+            score: score,
+            route: route,
+            bookNumber: bookNumber,
+            chapter: chapter,
+            verse: verse,
+            noteID: nil,
+            modulePath: modulePath,
+            lookupQuery: nil,
+            referenceKind: nil
+        )
+    }
+
+    static func commentary(
+        reference: String,
+        snippet: String,
+        moduleName: String,
+        bookNumber: Int,
+        chapter: Int,
+        verse: Int,
+        modulePath: String,
+        score: Int
+    ) -> SearchResult {
+        let route = SearchRoute.commentary(
+            bookNumber: bookNumber,
+            chapter: chapter,
+            moduleName: moduleName
+        )
+        return SearchResult(
+            type: .commentary,
+            reference: reference,
+            snippet: snippet,
+            moduleName: moduleName,
+            score: score,
+            route: route,
+            bookNumber: bookNumber,
+            chapter: chapter,
+            verse: verse,
+            noteID: nil,
+            modulePath: modulePath,
+            lookupQuery: nil,
+            referenceKind: nil
+        )
+    }
+
+    static func reference(
+        reference: String,
+        snippet: String,
+        moduleName: String,
+        modulePath: String,
+        lookupQuery: String,
+        kind: ReferenceKind,
+        score: Int
+    ) -> SearchResult {
+        let route = SearchRoute.reference(
+            modulePath: modulePath,
+            lookupQuery: lookupQuery,
+            kind: kind
+        )
+        return SearchResult(
+            type: .reference,
+            reference: reference,
+            snippet: snippet,
+            moduleName: moduleName,
+            score: score,
+            route: route,
+            bookNumber: 0,
+            chapter: 0,
+            verse: 0,
+            noteID: nil,
+            modulePath: modulePath,
+            lookupQuery: lookupQuery,
+            referenceKind: kind
+        )
+    }
+
+    static func note(
+        reference: String,
+        snippet: String,
+        note: Note,
+        score: Int
+    ) -> SearchResult {
+        let route = SearchRoute.note(note.id)
+        return SearchResult(
+            type: .notes,
+            reference: reference,
+            snippet: snippet,
+            moduleName: "Notes",
+            score: score,
+            route: route,
+            bookNumber: note.bookNumber,
+            chapter: note.chapterNumber,
+            verse: 0,
+            noteID: note.id,
+            modulePath: nil,
+            lookupQuery: nil,
+            referenceKind: nil
+        )
     }
 }
 

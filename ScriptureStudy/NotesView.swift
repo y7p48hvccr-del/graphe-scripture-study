@@ -257,24 +257,17 @@ struct NotesView: View {
                     }
 
                     // Suggest linking to current passage
-                    if !myBible.currentPassage.isEmpty &&
-                       myBible.currentPassage != note.verseReference {
+                    if let currentPassageState = myBible.currentPassageState,
+                       currentPassageState.verseReference != note.verseReference {
                         Button {
                             var u = note
-                            // Parse currentPassage to bookNumber/chapter
-                            let parts = myBible.currentPassage.components(separatedBy: " ")
-                            if let ch = parts.last.flatMap(Int.init) {
-                                let bookName = parts.dropLast().joined(separator: " ")
-                                if let bn = myBibleBookNumbers.first(where: { $0.value == bookName })?.key {
-                                    u.bookNumber    = bn
-                                    u.chapterNumber = ch
-                                }
-                            }
+                            u.bookNumber = currentPassageState.bookNumber
+                            u.chapterNumber = currentPassageState.chapter
                             notesManager.save(u)
                         } label: {
                             HStack(spacing: 3) {
                                 Image(systemName: "link").font(.system(size: 9))
-                                Text("Link to \(myBible.currentPassage)")
+                                Text("Link to \(currentPassageState.verseReference)")
                                     .font(.caption)
                             }
                         }
